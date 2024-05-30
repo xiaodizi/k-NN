@@ -29,6 +29,7 @@ buildscript {
             opensearch_build += "-${version_qualifier}"
             plugin_no_snapshot += "-${version_qualifier}"
         }
+        isSnapshot = true
         if (isSnapshot) {
             opensearch_build += "-SNAPSHOT"
         }
