@@ -167,6 +167,7 @@ allprojects {
     if (version_qualifier) {
         version += "-${version_qualifier}"
     }
+    isSnapshot = true
     if (isSnapshot) {
         version += "-SNAPSHOT"
     }
