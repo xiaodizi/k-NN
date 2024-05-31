@@ -117,7 +117,7 @@ fi
 
 # Build k-NN lib and plugin through gradle tasks
 cd $work_dir
-./gradlew build --no-daemon --refresh-dependencies -x integTest -x test -Dopensearch.version=$VERSION -Dbuild.snapshot=$SNAPSHOT -Dbuild.version_qualifier=$QUALIFIER -Dbuild.lib.commit_patches=false
+./gradlew build --no-daemon --refresh-dependencies -x javadoc -Dbuild.snapshot=$SNAPSHOT -Dbuild.version_qualifier=$QUALIFIER -Dbuild.lib.commit_patches=false
 ./gradlew :buildJniLib -Dsimd.enabled=false -Dbuild.lib.commit_patches=false
 
 if [ "$PLATFORM" != "windows" ] && [ "$ARCHITECTURE" = "x64" ]; then
@@ -125,8 +125,8 @@ if [ "$PLATFORM" != "windows" ] && [ "$ARCHITECTURE" = "x64" ]; then
   ./gradlew :buildJniLib -Dsimd.enabled=true -Dbuild.lib.commit_patches=false
 fi
 
-./gradlew publishPluginZipPublicationToZipStagingRepository -Dopensearch.version=$VERSION -Dbuild.snapshot=$SNAPSHOT -Dbuild.version_qualifier=$QUALIFIER
-./gradlew publishPluginZipPublicationToMavenLocal -Dbuild.snapshot=$SNAPSHOT -Dbuild.version_qualifier=$QUALIFIER -Dopensearch.version=$VERSION
+./gradlew publishPluginZipPublicationToZipStagingRepository -Dbuild.snapshot=$SNAPSHOT -Dbuild.version_qualifier=$QUALIFIER
+./gradlew publishPluginZipPublicationToMavenLocal -Dbuild.snapshot=$SNAPSHOT -Dbuild.version_qualifier=$QUALIFIER
 
 # Add lib to zip
 zipPath=$(find "$(pwd)/build/distributions" -path \*.zip)
