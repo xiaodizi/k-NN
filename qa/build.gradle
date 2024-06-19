@@ -18,14 +18,14 @@ assemble.enabled = false
 dependenciesInfo.enabled = false
 
 dependencies {
-    api "org.opensearch:opensearch:3.0.0-SNAPSHOT"
-    compileOnly "org.opensearch.plugin:opensearch-scripting-painless-spi:3.0.0-SNAPSHOT"
+    api "org.opensearch:opensearch:${opensearch_version}"
+    compileOnly "org.opensearch.plugin:opensearch-scripting-painless-spi:${versions.opensearch}"
     api group: 'commons-lang', name: 'commons-lang', version: '2.6'
 
     api "org.apache.logging.log4j:log4j-api:${versions.log4j}"
     api "org.apache.logging.log4j:log4j-core:${versions.log4j}"
 
-    testImplementation "org.opensearch.test:framework:3.0.0-SNAPSHOT"
+    testImplementation "org.opensearch.test:framework:${opensearch_version}"
     testImplementation(testFixtures(rootProject))
 }
 
