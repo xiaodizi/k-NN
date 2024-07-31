@@ -18,7 +18,6 @@ import org.mockito.MockedStatic;
 import org.opensearch.ExceptionsHelper;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.ResourceNotFoundException;
-import org.opensearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.opensearch.cluster.ClusterChangedEvent;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.action.DocWriteResponse;
@@ -30,15 +29,13 @@ import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.action.support.master.AcknowledgedResponse;
-import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.knn.KNNSingleNodeTestCase;
-import org.opensearch.knn.TestUtils;
 import org.opensearch.knn.common.exception.DeleteModelException;
 import org.opensearch.knn.index.MethodComponentContext;
 import org.opensearch.knn.index.SpaceType;
+import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.util.KNNEngine;
 import org.opensearch.knn.plugin.transport.DeleteModelResponse;
 import org.opensearch.knn.plugin.transport.GetModelResponse;
@@ -65,11 +62,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
-import static org.opensearch.knn.common.KNNConstants.MODEL_ID;
 import static org.opensearch.knn.common.KNNConstants.MODEL_INDEX_NAME;
-import static org.opensearch.knn.common.KNNConstants.PROPERTIES;
-import static org.opensearch.knn.common.KNNConstants.TYPE;
-import static org.opensearch.knn.common.KNNConstants.TYPE_KNN_VECTOR;
 
 public class ModelDaoTests extends KNNSingleNodeTestCase {
 
@@ -147,12 +140,13 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
         );
-        addDoc(model);
+        writeModelToModelSystemIndex(model);
         assertEquals(model, modelDao.get(modelId));
         assertNotNull(modelDao.getHealthStatus());
 
@@ -167,12 +161,13 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
         );
-        addDoc(model);
+        writeModelToModelSystemIndex(model);
         assertEquals(model, modelDao.get(modelId));
         assertNotNull(modelDao.getHealthStatus());
     }
@@ -195,7 +190,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                new MethodComponentContext("test", Collections.emptyMap())
+                new MethodComponentContext("test", Collections.emptyMap()),
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
@@ -256,7 +252,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
@@ -318,7 +315,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             "any-id"
@@ -355,7 +353,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             null,
             modelId
@@ -394,7 +393,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
@@ -445,12 +445,13 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
         );
-        addDoc(model);
+        writeModelToModelSystemIndex(model);
         assertEquals(model, modelDao.get(modelId));
 
         // Get model during training
@@ -464,12 +465,13 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             null,
             modelId
         );
-        addDoc(model);
+        writeModelToModelSystemIndex(model);
         assertEquals(model, modelDao.get(modelId));
     }
 
@@ -501,7 +503,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
             "",
             "",
             "",
-            MethodComponentContext.EMPTY
+            MethodComponentContext.EMPTY,
+            VectorDataType.DEFAULT
         );
 
         Model model = new Model(modelMetadata, modelBlob, modelId);
@@ -578,7 +581,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
@@ -612,7 +616,8 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId1
@@ -627,91 +632,6 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
         modelDao.put(model1, docCreationListener1);
 
         assertTrue(inProgressLatch3.await(100, TimeUnit.SECONDS));
-    }
-
-    // Test Delete Model when the model is in use by an index
-    public void testDeleteModelInUse() throws IOException, ExecutionException, InterruptedException {
-        String modelId = "test-model-id-training";
-        ModelDao modelDao = ModelDao.OpenSearchKNNModelDao.getInstance();
-        byte[] modelBlob = "deleteModel".getBytes();
-        int dimension = 2;
-        createIndex(MODEL_INDEX_NAME);
-
-        Model model = new Model(
-            new ModelMetadata(
-                KNNEngine.DEFAULT,
-                SpaceType.DEFAULT,
-                dimension,
-                ModelState.CREATED,
-                ZonedDateTime.now(ZoneOffset.UTC).toString(),
-                "",
-                "",
-                "",
-                MethodComponentContext.EMPTY
-            ),
-            modelBlob,
-            modelId
-        );
-
-        // created model and added it to index
-        addDoc(model);
-
-        String testIndex = "test-index";
-        String testField = "test-field";
-
-        /*
-            Constructs the following json:
-            {
-              "properties": {
-                "test-field": {
-                  "type": "knn_vector",
-                  "model_id": "test-model-id-training"
-                }
-              }
-            }
-         */
-        XContentBuilder mappings = XContentFactory.jsonBuilder()
-            .startObject()
-            .startObject(PROPERTIES)
-            .startObject(testField)
-            .field(TYPE, TYPE_KNN_VECTOR)
-            .field(MODEL_ID, modelId)
-            .endObject()
-            .endObject()
-            .endObject();
-
-        XContentBuilder settings = XContentFactory.jsonBuilder().startObject().field(TestUtils.INDEX_KNN, "true").endObject();
-
-        // Create index using model
-        CreateIndexRequestBuilder createIndexRequestBuilder = client().admin()
-            .indices()
-            .prepareCreate(testIndex)
-            .setMapping(mappings)
-            .setSettings(settings);
-        createIndex(testIndex, createIndexRequestBuilder);
-
-        CountDownLatch latch = new CountDownLatch(1);
-        modelDao.delete(modelId, new ActionListener<DeleteModelResponse>() {
-            @Override
-            public void onResponse(DeleteModelResponse deleteModelResponse) {
-                fail("Received delete model response when the request should have failed.");
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                assertTrue(e instanceof DeleteModelException);
-                assertEquals(
-                    String.format(
-                        "Cannot delete model [%s].  Model is in use by the following indices [%s], which must be deleted first.",
-                        modelId,
-                        testIndex
-                    ),
-                    e.getMessage()
-                );
-                latch.countDown();
-            }
-        });
-        assertTrue(latch.await(60, TimeUnit.SECONDS));
     }
 
     // Test Delete Model when modelId is in Model Graveyard (previous delete model request which failed to
@@ -765,14 +685,15 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
         );
 
         // created model and added it to index
-        addDoc(model);
+        writeModelToModelSystemIndex(model);
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
@@ -807,14 +728,15 @@ public class ModelDaoTests extends KNNSingleNodeTestCase {
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
         );
 
         // created model and added it to index
-        addDoc(model);
+        writeModelToModelSystemIndex(model);
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 

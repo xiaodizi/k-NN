@@ -17,6 +17,7 @@ import org.opensearch.knn.TestUtils;
 import org.opensearch.knn.common.exception.DeleteModelException;
 import org.opensearch.knn.index.MethodComponentContext;
 import org.opensearch.knn.index.SpaceType;
+import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.util.KNNEngine;
 import org.opensearch.knn.indices.Model;
 import org.opensearch.knn.indices.ModelGraveyard;
@@ -189,7 +190,7 @@ public class UpdateModelGraveyardTransportActionTests extends KNNSingleNodeTestC
         assertNull(updateModelGraveyardTransportAction.checkBlock(null, null));
     }
 
-    public void testGetIndicesUsingModel() throws IOException, ExecutionException, InterruptedException {
+    public void testClusterManagerOperation_GetIndicesUsingModel() throws IOException, ExecutionException, InterruptedException {
         // Get update transport action
         UpdateModelGraveyardTransportAction updateModelGraveyardTransportAction = node().injector()
             .getInstance(UpdateModelGraveyardTransportAction.class);
@@ -210,14 +211,15 @@ public class UpdateModelGraveyardTransportActionTests extends KNNSingleNodeTestC
                 "",
                 "",
                 "",
-                MethodComponentContext.EMPTY
+                MethodComponentContext.EMPTY,
+                VectorDataType.DEFAULT
             ),
             modelBlob,
             modelId
         );
 
         // created model and added it to index
-        addDoc(model);
+        addModel(model);
 
         // Create basic index (not using k-NN)
         String testIndex1 = "test-index1";
@@ -336,7 +338,7 @@ public class UpdateModelGraveyardTransportActionTests extends KNNSingleNodeTestC
         );
     }
 
-    public void updateModelGraveyardAndAssertNoError(
+    private void updateModelGraveyardAndAssertNoError(
         UpdateModelGraveyardTransportAction updateModelGraveyardTransportAction,
         UpdateModelGraveyardRequest updateModelGraveyardRequest
     ) throws InterruptedException {
@@ -355,7 +357,7 @@ public class UpdateModelGraveyardTransportActionTests extends KNNSingleNodeTestC
         assertTrue(countDownLatch.await(60, TimeUnit.SECONDS));
     }
 
-    public void updateModelGraveyardAndAssertDeleteModelException(
+    private void updateModelGraveyardAndAssertDeleteModelException(
         UpdateModelGraveyardTransportAction updateModelGraveyardTransportAction,
         UpdateModelGraveyardRequest updateModelGraveyardRequest,
         String indicesPresentInException

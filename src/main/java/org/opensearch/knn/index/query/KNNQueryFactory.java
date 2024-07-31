@@ -5,6 +5,7 @@
 
 package org.opensearch.knn.index.query;
 
+import com.google.common.annotations.VisibleForTesting;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
@@ -17,7 +18,9 @@ import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.util.KNNEngine;
 
 import java.util.Locale;
+import java.util.Map;
 
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_SEARCH;
 import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 import static org.opensearch.knn.index.VectorDataType.SUPPORTED_VECTOR_DATA_TYPES;
 
@@ -28,6 +31,9 @@ import static org.opensearch.knn.index.VectorDataType.SUPPORTED_VECTOR_DATA_TYPE
 public class KNNQueryFactory extends BaseQueryFactory {
 
     /**
+     * Note. This method should be used only for test.
+     * Should use {@link #create(CreateQueryRequest)} instead.
+     *
      * Creates a Lucene query for a particular engine.
      *
      * @param knnEngine Engine to create the query for
@@ -37,6 +43,7 @@ public class KNNQueryFactory extends BaseQueryFactory {
      * @param k the number of nearest neighbors to return
      * @return Lucene Query
      */
+    @VisibleForTesting
     public static Query create(
         KNNEngine knnEngine,
         String indexName,
@@ -71,6 +78,7 @@ public class KNNQueryFactory extends BaseQueryFactory {
         final byte[] byteVector = createQueryRequest.getByteVector();
         final VectorDataType vectorDataType = createQueryRequest.getVectorDataType();
         final Query filterQuery = getFilterQuery(createQueryRequest);
+        final Map<String, ?> methodParameters = createQueryRequest.getMethodParameters();
 
         BitSetProducer parentFilter = null;
         if (createQueryRequest.getContext().isPresent()) {
@@ -79,20 +87,54 @@ public class KNNQueryFactory extends BaseQueryFactory {
         }
 
         if (KNNEngine.getEnginesThatCreateCustomSegmentFiles().contains(createQueryRequest.getKnnEngine())) {
-            if (filterQuery != null && KNNEngine.getEnginesThatSupportsFilters().contains(createQueryRequest.getKnnEngine())) {
-                log.debug("Creating custom k-NN query with filters for index: {}, field: {} , k: {}", indexName, fieldName, k);
-                return new KNNQuery(fieldName, vector, k, indexName, filterQuery, parentFilter);
+            final Query validatedFilterQuery = validateFilterQuerySupport(filterQuery, createQueryRequest.getKnnEngine());
+
+            log.debug(
+                "Creating custom k-NN query for index:{}, field:{}, k:{}, filterQuery:{}, efSearch:{}",
+                indexName,
+                fieldName,
+                k,
+                validatedFilterQuery,
+                methodParameters
+            );
+
+            switch (vectorDataType) {
+                case BINARY:
+                    return KNNQuery.builder()
+                        .field(fieldName)
+                        .byteQueryVector(byteVector)
+                        .indexName(indexName)
+                        .parentsFilter(parentFilter)
+                        .k(k)
+                        .methodParameters(methodParameters)
+                        .filterQuery(validatedFilterQuery)
+                        .vectorDataType(vectorDataType)
+                        .build();
+                default:
+                    return KNNQuery.builder()
+                        .field(fieldName)
+                        .queryVector(vector)
+                        .indexName(indexName)
+                        .parentsFilter(parentFilter)
+                        .k(k)
+                        .methodParameters(methodParameters)
+                        .filterQuery(validatedFilterQuery)
+                        .vectorDataType(vectorDataType)
+                        .build();
             }
-            log.debug(String.format("Creating custom k-NN query for index: %s \"\", field: %s \"\", k: %d", indexName, fieldName, k));
-            return new KNNQuery(fieldName, vector, k, indexName, parentFilter);
         }
 
+        Integer requestEfSearch = null;
+        if (methodParameters != null && methodParameters.containsKey(METHOD_PARAMETER_EF_SEARCH)) {
+            requestEfSearch = (Integer) methodParameters.get(METHOD_PARAMETER_EF_SEARCH);
+        }
+        int luceneK = requestEfSearch == null ? k : Math.max(k, requestEfSearch);
         log.debug(String.format("Creating Lucene k-NN query for index: %s \"\", field: %s \"\", k: %d", indexName, fieldName, k));
         switch (vectorDataType) {
             case BYTE:
-                return getKnnByteVectorQuery(fieldName, byteVector, k, filterQuery, parentFilter);
+                return getKnnByteVectorQuery(fieldName, byteVector, luceneK, filterQuery, parentFilter);
             case FLOAT:
-                return getKnnFloatVectorQuery(fieldName, vector, k, filterQuery, parentFilter);
+                return getKnnFloatVectorQuery(fieldName, vector, luceneK, filterQuery, parentFilter);
             default:
                 throw new IllegalArgumentException(
                     String.format(
@@ -104,6 +146,14 @@ public class KNNQueryFactory extends BaseQueryFactory {
                     )
                 );
         }
+    }
+
+    private static Query validateFilterQuerySupport(final Query filterQuery, final KNNEngine knnEngine) {
+        log.debug("filter query {}, knnEngine {}", filterQuery, knnEngine);
+        if (filterQuery != null && KNNEngine.getEnginesThatSupportsFilters().contains(knnEngine)) {
+            return filterQuery;
+        }
+        return null;
     }
 
     /**

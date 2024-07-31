@@ -5,47 +5,60 @@
 
 package org.opensearch.knn.index.query;
 
-import java.io.IOException;
-import java.util.Arrays;
-
-import java.util.List;
-import java.util.Objects;
-
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
+import org.apache.commons.lang.StringUtils;
 import org.apache.lucene.search.MatchNoDocsQuery;
+import org.apache.lucene.search.Query;
+import org.opensearch.common.ValidationException;
+import org.opensearch.core.ParseField;
 import org.opensearch.core.common.Strings;
-import org.opensearch.index.mapper.NumberFieldMapper;
+import org.opensearch.core.common.io.stream.StreamInput;
+import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.index.mapper.MappedFieldType;
+import org.opensearch.index.query.AbstractQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
-import org.opensearch.knn.common.KNNConstants;
+import org.opensearch.index.query.QueryRewriteContext;
+import org.opensearch.index.query.QueryShardContext;
+import org.opensearch.knn.index.IndexUtil;
 import org.opensearch.knn.index.KNNMethodContext;
+import org.opensearch.knn.index.MethodComponentContext;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.VectorQueryType;
 import org.opensearch.knn.index.mapper.KNNVectorFieldMapper;
+import org.opensearch.knn.index.query.parser.KNNQueryBuilderParser;
+import org.opensearch.knn.index.util.EngineSpecificMethodContext;
 import org.opensearch.knn.index.util.KNNEngine;
+import org.opensearch.knn.index.util.QueryContext;
 import org.opensearch.knn.indices.ModelDao;
 import org.opensearch.knn.indices.ModelMetadata;
 import org.opensearch.knn.indices.ModelUtil;
-import org.apache.lucene.search.Query;
-import org.opensearch.core.ParseField;
-import org.opensearch.core.common.ParsingException;
-import org.opensearch.core.common.io.stream.StreamInput;
-import org.opensearch.core.common.io.stream.StreamOutput;
-import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.core.xcontent.XContentParser;
-import org.opensearch.index.mapper.MappedFieldType;
-import org.opensearch.index.query.AbstractQueryBuilder;
-import org.opensearch.index.query.QueryShardContext;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 
 import static org.opensearch.knn.common.KNNConstants.MAX_DISTANCE;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_SEARCH;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_NPROBES;
 import static org.opensearch.knn.common.KNNConstants.MIN_SCORE;
 import static org.opensearch.knn.common.KNNValidationUtil.validateByteVectorValue;
-import static org.opensearch.knn.index.IndexUtil.isClusterOnOrAfterMinRequiredVersion;
+import static org.opensearch.knn.index.query.parser.MethodParametersParser.validateMethodParameters;
 import static org.opensearch.knn.index.util.KNNEngine.ENGINES_SUPPORTING_RADIAL_SEARCH;
+import static org.opensearch.knn.validation.ParameterValidator.validateParameters;
 
 /**
  * Helper class to build the KNN query
  */
+// The builder validates the member variables so access to the constructor is prohibited to not accidentally bypass validations
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 @Log4j2
 public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
     private static ModelDao modelDao;
@@ -56,6 +69,10 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
     public static final ParseField IGNORE_UNMAPPED_FIELD = new ParseField("ignore_unmapped");
     public static final ParseField MAX_DISTANCE_FIELD = new ParseField(MAX_DISTANCE);
     public static final ParseField MIN_SCORE_FIELD = new ParseField(MIN_SCORE);
+    public static final ParseField EF_SEARCH_FIELD = new ParseField(METHOD_PARAMETER_EF_SEARCH);
+    public static final ParseField NPROBE_FIELD = new ParseField(METHOD_PARAMETER_NPROBES);
+    public static final ParseField METHOD_PARAMS_FIELD = new ParseField(METHOD_PARAMETER);
+
     public static final int K_MAX = 10000;
     /**
      * The name for the knn query
@@ -66,18 +83,27 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
      */
     private final String fieldName;
     private final float[] vector;
-    private int k = 0;
-    private Float maxDistance = null;
-    private Float minScore = null;
+    @Getter
+    private int k;
+    @Getter
+    private Float maxDistance;
+    @Getter
+    private Float minScore;
+    @Getter
+    private Map<String, ?> methodParameters;
+    @Getter
     private QueryBuilder filter;
-    private boolean ignoreUnmapped = false;
+    @Getter
+    private boolean ignoreUnmapped;
 
     /**
      * Constructs a new query with the given field name and vector
      *
      * @param fieldName Name of the field
      * @param vector    Array of floating points
+     * @deprecated Use {@code {@link KNNQueryBuilder.Builder}} instead
      */
+    @Deprecated
     public KNNQueryBuilder(String fieldName, float[] vector) {
         if (Strings.isNullOrEmpty(fieldName)) {
             throw new IllegalArgumentException(String.format("[%s] requires fieldName", NAME));
@@ -93,61 +119,131 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
     }
 
     /**
-     * Builder method for k
-     *
-     * @param k K nearest neighbours for the given vector
+     * lombok SuperBuilder annotation requires a builder annotation on parent class to work well
+     * {@link AbstractQueryBuilder#boost()} and {@link AbstractQueryBuilder#queryName()} both need to be called
+     * A custom builder helps with the calls to the parent class, simultaneously addressing the problem of telescoping
+     * constructors in this class.
      */
-    public KNNQueryBuilder k(Integer k) {
-        if (k == null) {
-            throw new IllegalArgumentException(String.format("[%s] requires k to be set", NAME));
+    public static class Builder {
+        private String fieldName;
+        private float[] vector;
+        private Integer k;
+        private Map<String, ?> methodParameters;
+        private Float maxDistance;
+        private Float minScore;
+        private QueryBuilder filter;
+        private boolean ignoreUnmapped;
+        private String queryName;
+        private float boost = DEFAULT_BOOST;
+
+        public Builder() {}
+
+        public Builder fieldName(String fieldName) {
+            this.fieldName = fieldName;
+            return this;
         }
-        validateSingleQueryType(k, maxDistance, minScore);
-        if (k <= 0 || k > K_MAX) {
-            throw new IllegalArgumentException(String.format("[%s] requires k to be in the range (0, %d]", NAME, K_MAX));
+
+        public Builder vector(float[] vector) {
+            this.vector = vector;
+            return this;
         }
-        this.k = k;
-        return this;
+
+        public Builder k(Integer k) {
+            this.k = k;
+            return this;
+        }
+
+        public Builder methodParameters(Map<String, ?> methodParameters) {
+            this.methodParameters = methodParameters;
+            return this;
+        }
+
+        public Builder maxDistance(Float maxDistance) {
+            this.maxDistance = maxDistance;
+            return this;
+        }
+
+        public Builder minScore(Float minScore) {
+            this.minScore = minScore;
+            return this;
+        }
+
+        public Builder ignoreUnmapped(boolean ignoreUnmapped) {
+            this.ignoreUnmapped = ignoreUnmapped;
+            return this;
+        }
+
+        public Builder filter(QueryBuilder filter) {
+            this.filter = filter;
+            return this;
+        }
+
+        public Builder queryName(String queryName) {
+            this.queryName = queryName;
+            return this;
+        }
+
+        public Builder boost(float boost) {
+            this.boost = boost;
+            return this;
+        }
+
+        public KNNQueryBuilder build() {
+            validate();
+            int k = this.k == null ? 0 : this.k;
+            return new KNNQueryBuilder(fieldName, vector, k, maxDistance, minScore, methodParameters, filter, ignoreUnmapped).boost(boost)
+                .queryName(queryName);
+        }
+
+        private void validate() {
+            if (Strings.isNullOrEmpty(fieldName)) {
+                throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires fieldName", NAME));
+            }
+
+            if (vector == null) {
+                throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires query vector", NAME));
+            } else if (vector.length == 0) {
+                throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] query vector is empty", NAME));
+            }
+
+            if (k == null && minScore == null && maxDistance == null) {
+                throw new IllegalArgumentException(
+                    String.format(Locale.ROOT, "[%s] requires exactly one of k, distance or score to be set", NAME)
+                );
+            }
+
+            if ((k != null && maxDistance != null) || (maxDistance != null && minScore != null) || (k != null && minScore != null)) {
+                throw new IllegalArgumentException(
+                    String.format(Locale.ROOT, "[%s] requires exactly one of k, distance or score to be set", NAME)
+                );
+            }
+
+            if (k != null) {
+                if (k <= 0 || k > K_MAX) {
+                    final String errorMessage = "[" + NAME + "] requires k to be in the range (0, " + K_MAX + "]";
+                    throw new IllegalArgumentException(errorMessage);
+                }
+            }
+
+            if (minScore != null) {
+                if (minScore <= 0) {
+                    throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires minScore to be greater than 0", NAME));
+                }
+            }
+
+            if (methodParameters != null) {
+                ValidationException validationException = validateMethodParameters(methodParameters);
+                if (validationException != null) {
+                    throw new IllegalArgumentException(
+                        String.format(Locale.ROOT, "[%s] errors in method parameter [%s]", NAME, validationException.getMessage())
+                    );
+                }
+            }
+        }
     }
 
-    /**
-     * Builder method for maxDistance
-     *
-     * @param maxDistance the maxDistance threshold for the nearest neighbours
-     */
-    public KNNQueryBuilder maxDistance(Float maxDistance) {
-        if (maxDistance == null) {
-            throw new IllegalArgumentException(String.format("[%s] requires maxDistance to be set", NAME));
-        }
-        validateSingleQueryType(k, maxDistance, minScore);
-        this.maxDistance = maxDistance;
-        return this;
-    }
-
-    /**
-     * Builder method for minScore
-     *
-     * @param minScore the minScore threshold for the nearest neighbours
-     */
-    public KNNQueryBuilder minScore(Float minScore) {
-        if (minScore == null) {
-            throw new IllegalArgumentException(String.format("[%s] requires minScore to be set", NAME));
-        }
-        validateSingleQueryType(k, maxDistance, minScore);
-        if (minScore <= 0) {
-            throw new IllegalArgumentException(String.format("[%s] requires minScore to be greater than 0", NAME));
-        }
-        this.minScore = minScore;
-        return this;
-    }
-
-    /**
-     * Builder method for filter
-     *
-     * @param filter QueryBuilder
-     */
-    public KNNQueryBuilder filter(QueryBuilder filter) {
-        this.filter = filter;
-        return this;
+    public static KNNQueryBuilder.Builder builder() {
+        return new KNNQueryBuilder.Builder();
     }
 
     /**
@@ -157,25 +253,27 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
      * @param vector    Array of floating points
      * @param k         K nearest neighbours for the given vector
      */
+    @Deprecated
     public KNNQueryBuilder(String fieldName, float[] vector, int k) {
         this(fieldName, vector, k, null);
     }
 
+    @Deprecated
     public KNNQueryBuilder(String fieldName, float[] vector, int k, QueryBuilder filter) {
         if (Strings.isNullOrEmpty(fieldName)) {
-            throw new IllegalArgumentException(String.format("[%s] requires fieldName", NAME));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires fieldName", NAME));
         }
         if (vector == null) {
-            throw new IllegalArgumentException(String.format("[%s] requires query vector", NAME));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires query vector", NAME));
         }
         if (vector.length == 0) {
-            throw new IllegalArgumentException(String.format("[%s] query vector is empty", NAME));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] query vector is empty", NAME));
         }
         if (k <= 0) {
-            throw new IllegalArgumentException(String.format("[%s] requires k > 0", NAME));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires k > 0", NAME));
         }
         if (k > K_MAX) {
-            throw new IllegalArgumentException(String.format("[%s] requires k <= %d", NAME, K_MAX));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires k <= %d", NAME, K_MAX));
         }
 
         this.fieldName = fieldName;
@@ -191,148 +289,26 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
         KNNQueryBuilder.modelDao = modelDao;
     }
 
-    private static float[] ObjectsToFloats(List<Object> objs) {
-        if (Objects.isNull(objs) || objs.isEmpty()) {
-            throw new IllegalArgumentException(String.format("[%s] field 'vector' requires to be non-null and non-empty", NAME));
-        }
-        float[] vec = new float[objs.size()];
-        for (int i = 0; i < objs.size(); i++) {
-            if ((objs.get(i) instanceof Number) == false) {
-                throw new IllegalArgumentException(String.format("[%s] field 'vector' requires to be an array of numbers", NAME));
-            }
-            vec[i] = ((Number) objs.get(i)).floatValue();
-        }
-        return vec;
-    }
-
     /**
      * @param in Reads from stream
      * @throws IOException Throws IO Exception
      */
     public KNNQueryBuilder(StreamInput in) throws IOException {
         super(in);
-        try {
-            fieldName = in.readString();
-            vector = in.readFloatArray();
-            k = in.readInt();
-            filter = in.readOptionalNamedWriteable(QueryBuilder.class);
-            if (isClusterOnOrAfterMinRequiredVersion("ignore_unmapped")) {
-                ignoreUnmapped = in.readOptionalBoolean();
-            }
-            if (isClusterOnOrAfterMinRequiredVersion(KNNConstants.RADIAL_SEARCH_KEY)) {
-                maxDistance = in.readOptionalFloat();
-            }
-            if (isClusterOnOrAfterMinRequiredVersion(KNNConstants.RADIAL_SEARCH_KEY)) {
-                minScore = in.readOptionalFloat();
-            }
-        } catch (IOException ex) {
-            throw new RuntimeException("[KNN] Unable to create KNNQueryBuilder", ex);
-        }
-    }
-
-    public static KNNQueryBuilder fromXContent(XContentParser parser) throws IOException {
-        String fieldName = null;
-        List<Object> vector = null;
-        float boost = AbstractQueryBuilder.DEFAULT_BOOST;
-        Integer k = null;
-        Float maxDistance = null;
-        Float minScore = null;
-        QueryBuilder filter = null;
-        String queryName = null;
-        String currentFieldName = null;
-        boolean ignoreUnmapped = false;
-        XContentParser.Token token;
-        while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
-            if (token == XContentParser.Token.FIELD_NAME) {
-                currentFieldName = parser.currentName();
-            } else if (token == XContentParser.Token.START_OBJECT) {
-                throwParsingExceptionOnMultipleFields(NAME, parser.getTokenLocation(), fieldName, currentFieldName);
-                fieldName = currentFieldName;
-                while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
-                    if (token == XContentParser.Token.FIELD_NAME) {
-                        currentFieldName = parser.currentName();
-                    } else if (token.isValue() || token == XContentParser.Token.START_ARRAY) {
-                        if (VECTOR_FIELD.match(currentFieldName, parser.getDeprecationHandler())) {
-                            vector = parser.list();
-                        } else if (AbstractQueryBuilder.BOOST_FIELD.match(currentFieldName, parser.getDeprecationHandler())) {
-                            boost = parser.floatValue();
-                        } else if (K_FIELD.match(currentFieldName, parser.getDeprecationHandler())) {
-                            k = (Integer) NumberFieldMapper.NumberType.INTEGER.parse(parser.objectBytes(), false);
-                        } else if (IGNORE_UNMAPPED_FIELD.getPreferredName().equals(currentFieldName)) {
-                            if (isClusterOnOrAfterMinRequiredVersion("ignore_unmapped")) {
-                                ignoreUnmapped = parser.booleanValue();
-                            }
-                        } else if (AbstractQueryBuilder.NAME_FIELD.match(currentFieldName, parser.getDeprecationHandler())) {
-                            queryName = parser.text();
-                        } else if (MAX_DISTANCE_FIELD.match(currentFieldName, parser.getDeprecationHandler())) {
-                            maxDistance = (Float) NumberFieldMapper.NumberType.FLOAT.parse(parser.objectBytes(), false);
-                        } else if (MIN_SCORE_FIELD.match(currentFieldName, parser.getDeprecationHandler())) {
-                            minScore = (Float) NumberFieldMapper.NumberType.FLOAT.parse(parser.objectBytes(), false);
-                        } else {
-                            throw new ParsingException(
-                                parser.getTokenLocation(),
-                                "[" + NAME + "] query does not support [" + currentFieldName + "]"
-                            );
-                        }
-                    } else if (token == XContentParser.Token.START_OBJECT) {
-                        String tokenName = parser.currentName();
-                        if (FILTER_FIELD.getPreferredName().equals(tokenName)) {
-                            log.debug(String.format("Start parsing filter for field [%s]", fieldName));
-                            filter = parseInnerQueryBuilder(parser);
-                        } else {
-                            throw new ParsingException(parser.getTokenLocation(), "[" + NAME + "] unknown token [" + token + "]");
-                        }
-                    } else {
-                        throw new ParsingException(
-                            parser.getTokenLocation(),
-                            "[" + NAME + "] unknown token [" + token + "] after [" + currentFieldName + "]"
-                        );
-                    }
-                }
-            } else {
-                throwParsingExceptionOnMultipleFields(NAME, parser.getTokenLocation(), fieldName, parser.currentName());
-                fieldName = parser.currentName();
-                vector = parser.list();
-            }
-        }
-
-        VectorQueryType vectorQueryType = validateSingleQueryType(k, maxDistance, minScore);
-        vectorQueryType.getQueryStatCounter().increment();
-        if (filter != null) {
-            vectorQueryType.getQueryWithFilterStatCounter().increment();
-        }
-
-        KNNQueryBuilder knnQueryBuilder = new KNNQueryBuilder(fieldName, ObjectsToFloats(vector)).filter(filter)
-            .ignoreUnmapped(ignoreUnmapped)
-            .boost(boost)
-            .queryName(queryName);
-
-        if (k != null) {
-            knnQueryBuilder.k(k);
-        } else if (maxDistance != null) {
-            knnQueryBuilder.maxDistance(maxDistance);
-        } else if (minScore != null) {
-            knnQueryBuilder.minScore(minScore);
-        }
-
-        return knnQueryBuilder;
+        KNNQueryBuilder.Builder builder = KNNQueryBuilderParser.streamInput(in, IndexUtil::isClusterOnOrAfterMinRequiredVersion);
+        fieldName = builder.fieldName;
+        vector = builder.vector;
+        k = builder.k;
+        filter = builder.filter;
+        ignoreUnmapped = builder.ignoreUnmapped;
+        maxDistance = builder.maxDistance;
+        minScore = builder.minScore;
+        methodParameters = builder.methodParameters;
     }
 
     @Override
     protected void doWriteTo(StreamOutput out) throws IOException {
-        out.writeString(fieldName);
-        out.writeFloatArray(vector);
-        out.writeInt(k);
-        out.writeOptionalNamedWriteable(filter);
-        if (isClusterOnOrAfterMinRequiredVersion("ignore_unmapped")) {
-            out.writeOptionalBoolean(ignoreUnmapped);
-        }
-        if (isClusterOnOrAfterMinRequiredVersion(KNNConstants.RADIAL_SEARCH_KEY)) {
-            out.writeOptionalFloat(maxDistance);
-        }
-        if (isClusterOnOrAfterMinRequiredVersion(KNNConstants.RADIAL_SEARCH_KEY)) {
-            out.writeOptionalFloat(minScore);
-        }
+        KNNQueryBuilderParser.streamOutput(out, this, IndexUtil::isClusterOnOrAfterMinRequiredVersion);
     }
 
     /**
@@ -349,58 +325,9 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
         return this.vector;
     }
 
-    public int getK() {
-        return this.k;
-    }
-
-    public float getMaxDistance() {
-        return this.maxDistance;
-    }
-
-    public float getMinScore() {
-        return this.minScore;
-    }
-
-    public QueryBuilder getFilter() {
-        return this.filter;
-    }
-
-    /**
-     * Sets whether the query builder should ignore unmapped paths (and run a
-     * {@link MatchNoDocsQuery} in place of this query) or throw an exception if
-     * the path is unmapped.
-     */
-    public KNNQueryBuilder ignoreUnmapped(boolean ignoreUnmapped) {
-        this.ignoreUnmapped = ignoreUnmapped;
-        return this;
-    }
-
-    public boolean getIgnoreUnmapped() {
-        return this.ignoreUnmapped;
-    }
-
     @Override
     public void doXContent(XContentBuilder builder, Params params) throws IOException {
-        builder.startObject(NAME);
-        builder.startObject(fieldName);
-
-        builder.field(VECTOR_FIELD.getPreferredName(), vector);
-        builder.field(K_FIELD.getPreferredName(), k);
-        if (filter != null) {
-            builder.field(FILTER_FIELD.getPreferredName(), filter);
-        }
-        if (maxDistance != null) {
-            builder.field(MAX_DISTANCE_FIELD.getPreferredName(), maxDistance);
-        }
-        if (ignoreUnmapped) {
-            builder.field(IGNORE_UNMAPPED_FIELD.getPreferredName(), ignoreUnmapped);
-        }
-        if (minScore != null) {
-            builder.field(MIN_SCORE_FIELD.getPreferredName(), minScore);
-        }
-        printBoostAndQueryName(builder);
-        builder.endObject();
-        builder.endObject();
+        KNNQueryBuilderParser.toXContent(builder, params, this);
     }
 
     @Override
@@ -412,15 +339,18 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
         }
 
         if (!(mappedFieldType instanceof KNNVectorFieldMapper.KNNVectorFieldType)) {
-            throw new IllegalArgumentException(String.format("Field '%s' is not knn_vector type.", this.fieldName));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "Field '%s' is not knn_vector type.", this.fieldName));
         }
 
         KNNVectorFieldMapper.KNNVectorFieldType knnVectorFieldType = (KNNVectorFieldMapper.KNNVectorFieldType) mappedFieldType;
         int fieldDimension = knnVectorFieldType.getDimension();
         KNNMethodContext knnMethodContext = knnVectorFieldType.getKnnMethodContext();
+        MethodComponentContext methodComponentContext = null;
         KNNEngine knnEngine = KNNEngine.DEFAULT;
         VectorDataType vectorDataType = knnVectorFieldType.getVectorDataType();
         SpaceType spaceType = knnVectorFieldType.getSpaceType();
+        VectorQueryType vectorQueryType = getVectorQueryType(k, maxDistance, minScore);
+        updateQueryStats(vectorQueryType);
 
         if (fieldDimension == -1) {
             if (spaceType != null) {
@@ -431,10 +361,47 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
             fieldDimension = modelMetadata.getDimension();
             knnEngine = modelMetadata.getKnnEngine();
             spaceType = modelMetadata.getSpaceType();
+            methodComponentContext = modelMetadata.getMethodComponentContext();
+            vectorDataType = modelMetadata.getVectorDataType();
+
         } else if (knnMethodContext != null) {
             // If the dimension is set but the knnMethodContext is not then the field is using the legacy mapping
             knnEngine = knnMethodContext.getKnnEngine();
             spaceType = knnMethodContext.getSpaceType();
+            methodComponentContext = knnMethodContext.getMethodComponentContext();
+        }
+
+        final String method = methodComponentContext != null ? methodComponentContext.getName() : null;
+        if (StringUtils.isNotBlank(method)) {
+            final EngineSpecificMethodContext engineSpecificMethodContext = knnEngine.getMethodContext(method);
+            QueryContext queryContext = new QueryContext(vectorQueryType);
+            ValidationException validationException = validateParameters(
+                engineSpecificMethodContext.supportedMethodParameters(queryContext),
+                (Map<String, Object>) methodParameters
+            );
+            if (validationException != null) {
+                throw new IllegalArgumentException(
+                    String.format(
+                        Locale.ROOT,
+                        "Parameters not valid for [%s]:[%s]:[%s] combination: [%s]",
+                        knnEngine,
+                        method,
+                        vectorQueryType.getQueryTypeName(),
+                        validationException.getMessage()
+                    )
+                );
+            }
+        }
+
+        if (this.maxDistance != null || this.minScore != null) {
+            if (!ENGINES_SUPPORTING_RADIAL_SEARCH.contains(knnEngine)) {
+                throw new UnsupportedOperationException(
+                    String.format(Locale.ROOT, "Engine [%s] does not support radial search", knnEngine)
+                );
+            }
+            if (vectorDataType == VectorDataType.BINARY) {
+                throw new UnsupportedOperationException(String.format(Locale.ROOT, "Binary data type does not support radial search"));
+            }
         }
 
         // Currently, k-NN supports distance and score types radial search
@@ -458,17 +425,25 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
             radius = knnEngine.scoreToRadialThreshold(this.minScore, spaceType);
         }
 
-        if (fieldDimension != vector.length) {
+        int vectorLength = VectorDataType.BINARY == vectorDataType ? vector.length * Byte.SIZE : vector.length;
+        if (fieldDimension != vectorLength) {
             throw new IllegalArgumentException(
-                String.format("Query vector has invalid dimension: %d. Dimension should be: %d", vector.length, fieldDimension)
+                String.format("Query vector has invalid dimension: %d. Dimension should be: %d", vectorLength, fieldDimension)
             );
         }
 
         byte[] byteVector = new byte[0];
-        if (VectorDataType.BYTE == vectorDataType) {
+        if (VectorDataType.BINARY == vectorDataType) {
             byteVector = new byte[vector.length];
             for (int i = 0; i < vector.length; i++) {
-                validateByteVectorValue(vector[i]);
+                validateByteVectorValue(vector[i], knnVectorFieldType.getVectorDataType());
+                byteVector[i] = (byte) vector[i];
+            }
+            spaceType.validateVector(byteVector);
+        } else if (VectorDataType.BYTE == vectorDataType) {
+            byteVector = new byte[vector.length];
+            for (int i = 0; i < vector.length; i++) {
+                validateByteVectorValue(vector[i], knnVectorFieldType.getVectorDataType());
                 byteVector[i] = (byte) vector[i];
             }
             spaceType.validateVector(byteVector);
@@ -479,7 +454,7 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
         if (KNNEngine.getEnginesThatCreateCustomSegmentFiles().contains(knnEngine)
             && filter != null
             && !KNNEngine.getEnginesThatSupportsFilters().contains(knnEngine)) {
-            throw new IllegalArgumentException(String.format("Engine [%s] does not support filters", knnEngine));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "Engine [%s] does not support filters", knnEngine));
         }
 
         String indexName = context.index().getName();
@@ -490,18 +465,16 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
                 .indexName(indexName)
                 .fieldName(this.fieldName)
                 .vector(VectorDataType.FLOAT == vectorDataType ? this.vector : null)
-                .byteVector(VectorDataType.BYTE == vectorDataType ? byteVector : null)
+                .byteVector(VectorDataType.BYTE == vectorDataType || VectorDataType.BINARY == vectorDataType ? byteVector : null)
                 .vectorDataType(vectorDataType)
                 .k(this.k)
+                .methodParameters(this.methodParameters)
                 .filter(this.filter)
                 .context(context)
                 .build();
             return KNNQueryFactory.create(createQueryRequest);
         }
         if (radius != null) {
-            if (!ENGINES_SUPPORTING_RADIAL_SEARCH.contains(knnEngine)) {
-                throw new UnsupportedOperationException(String.format("Engine [%s] does not support radial search", knnEngine));
-            }
             RNNQueryFactory.CreateQueryRequest createQueryRequest = RNNQueryFactory.CreateQueryRequest.builder()
                 .knnEngine(knnEngine)
                 .indexName(indexName)
@@ -510,26 +483,59 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
                 .byteVector(VectorDataType.BYTE == vectorDataType ? byteVector : null)
                 .vectorDataType(vectorDataType)
                 .radius(radius)
+                .methodParameters(this.methodParameters)
                 .filter(this.filter)
                 .context(context)
                 .build();
             return RNNQueryFactory.create(createQueryRequest);
         }
-        throw new IllegalArgumentException(String.format("[%s] requires k or distance or score to be set", NAME));
+        throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires k or distance or score to be set", NAME));
     }
 
     private ModelMetadata getModelMetadataForField(KNNVectorFieldMapper.KNNVectorFieldType knnVectorField) {
         String modelId = knnVectorField.getModelId();
 
         if (modelId == null) {
-            throw new IllegalArgumentException(String.format("Field '%s' does not have model.", this.fieldName));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "Field '%s' does not have model.", this.fieldName));
         }
 
         ModelMetadata modelMetadata = modelDao.getMetadata(modelId);
         if (!ModelUtil.isModelCreated(modelMetadata)) {
-            throw new IllegalArgumentException(String.format("Model ID '%s' is not created.", modelId));
+            throw new IllegalArgumentException(String.format(Locale.ROOT, "Model ID '%s' is not created.", modelId));
         }
         return modelMetadata;
+    }
+
+    /**
+     * Function to get the vector query type based on the valid query parameter.
+     *
+     * @param k K nearest neighbours for the given vector, if k is set, then the query type is K
+     * @param maxDistance Maximum distance for the given vector, if maxDistance is set, then the query type is MAX_DISTANCE
+     * @param minScore Minimum score for the given vector, if minScore is set, then the query type is MIN_SCORE
+     */
+    private VectorQueryType getVectorQueryType(int k, Float maxDistance, Float minScore) {
+        if (maxDistance != null) {
+            return VectorQueryType.MAX_DISTANCE;
+        }
+        if (minScore != null) {
+            return VectorQueryType.MIN_SCORE;
+        }
+        if (k != 0) {
+            return VectorQueryType.K;
+        }
+        throw new IllegalArgumentException(String.format(Locale.ROOT, "[%s] requires exactly one of k, distance or score to be set", NAME));
+    }
+
+    /**
+     * Function to update query stats.
+     *
+     * @param vectorQueryType The type of query to be executed
+     */
+    private void updateQueryStats(VectorQueryType vectorQueryType) {
+        vectorQueryType.getQueryStatCounter().increment();
+        if (filter != null) {
+            vectorQueryType.getQueryWithFilterStatCounter().increment();
+        }
     }
 
     @Override
@@ -537,13 +543,16 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
         return Objects.equals(fieldName, other.fieldName)
             && Arrays.equals(vector, other.vector)
             && Objects.equals(k, other.k)
+            && Objects.equals(minScore, other.minScore)
+            && Objects.equals(maxDistance, other.maxDistance)
+            && Objects.equals(methodParameters, other.methodParameters)
             && Objects.equals(filter, other.filter)
             && Objects.equals(ignoreUnmapped, other.ignoreUnmapped);
     }
 
     @Override
     protected int doHashCode() {
-        return Objects.hash(fieldName, Arrays.hashCode(vector), k, filter, ignoreUnmapped);
+        return Objects.hash(fieldName, Arrays.hashCode(vector), k, methodParameters, filter, ignoreUnmapped, maxDistance, minScore);
     }
 
     @Override
@@ -551,27 +560,12 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> {
         return NAME;
     }
 
-    private static VectorQueryType validateSingleQueryType(Integer k, Float distance, Float score) {
-        int countSetFields = 0;
-        VectorQueryType vectorQueryType = null;
-
-        if (k != null && k != 0) {
-            countSetFields++;
-            vectorQueryType = VectorQueryType.K;
+    @Override
+    protected QueryBuilder doRewrite(QueryRewriteContext queryShardContext) throws IOException {
+        // rewrite filter query if it exists to avoid runtime errors in next steps of query phase
+        if (Objects.nonNull(filter)) {
+            filter = filter.rewrite(queryShardContext);
         }
-        if (distance != null) {
-            countSetFields++;
-            vectorQueryType = VectorQueryType.MAX_DISTANCE;
-        }
-        if (score != null) {
-            countSetFields++;
-            vectorQueryType = VectorQueryType.MIN_SCORE;
-        }
-
-        if (countSetFields != 1) {
-            throw new IllegalArgumentException(String.format("[%s] requires exactly one of k, distance or score to be set", NAME));
-        }
-
-        return vectorQueryType;
+        return super.doRewrite(queryShardContext);
     }
 }

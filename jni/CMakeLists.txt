@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-cmake_minimum_required(VERSION 3.23.1)
+cmake_minimum_required(VERSION 3.24.0)
 
 project(KNNPlugin_JNI)
 
@@ -20,7 +20,6 @@ set(TARGET_LIBS "")  # Libs to be installed
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-
 option(CONFIG_FAISS "Configure faiss library build when this is on")
 option(CONFIG_NMSLIB "Configure nmslib library build when this is on")
 option(CONFIG_TEST "Configure tests when this is on")
@@ -112,6 +111,8 @@ if (${CONFIG_FAISS} STREQUAL ON OR ${CONFIG_ALL} STREQUAL ON OR ${CONFIG_TEST} S
         ${CMAKE_CURRENT_SOURCE_DIR}/src/org_opensearch_knn_jni_FaissService.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/faiss_wrapper.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/faiss_util.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/faiss_index_service.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/faiss_methods.cpp
     )
     target_link_libraries(${TARGET_LIB_FAISS} ${TARGET_LINK_FAISS_LIB} ${TARGET_LIB_UTIL} OpenMP::OpenMP_CXX)
     target_include_directories(${TARGET_LIB_FAISS} PRIVATE
@@ -147,10 +148,13 @@ if ("${WIN32}" STREQUAL "")
         add_executable(
                 jni_test
                 tests/faiss_wrapper_test.cpp
+                tests/faiss_wrapper_unit_test.cpp
                 tests/faiss_util_test.cpp
                 tests/nmslib_wrapper_test.cpp
+                tests/nmslib_wrapper_unit_test.cpp
                 tests/test_util.cpp
                 tests/commons_test.cpp
+                tests/faiss_index_service_test.cpp
                 )
 
         target_link_libraries(

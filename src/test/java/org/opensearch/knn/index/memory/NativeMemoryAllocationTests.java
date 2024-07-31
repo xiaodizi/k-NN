@@ -12,9 +12,11 @@
 package org.opensearch.knn.index.memory;
 
 import com.google.common.collect.ImmutableMap;
+import lombok.SneakyThrows;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.IndexUtil;
+import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.jni.JNICommons;
 import org.opensearch.knn.jni.JNIService;
 import org.opensearch.knn.index.SpaceType;
@@ -72,6 +74,69 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
             path,
             "test",
             watcherHandle
+        );
+
+        indexAllocation.close();
+
+        Thread.sleep(1000 * 2);
+        indexAllocation.writeLock();
+        assertTrue(indexAllocation.isClosed());
+        indexAllocation.writeUnlock();
+
+        indexAllocation.close();
+
+        Thread.sleep(1000 * 2);
+        indexAllocation.writeLock();
+        assertTrue(indexAllocation.isClosed());
+        indexAllocation.writeUnlock();
+
+        executorService.shutdown();
+    }
+
+    @SneakyThrows
+    public void testClose_whenBinaryFiass_thenSuccess() {
+        Path dir = createTempDir();
+        KNNEngine knnEngine = KNNEngine.FAISS;
+        String indexName = "test1" + knnEngine.getExtension();
+        String path = dir.resolve(indexName).toAbsolutePath().toString();
+        int numVectors = 10;
+        int dimension = 8;
+        int dataLength = dimension / 8;
+        int[] ids = new int[numVectors];
+        byte[][] vectors = new byte[numVectors][dataLength];
+        for (int i = 0; i < numVectors; i++) {
+            ids[i] = i;
+            vectors[i][0] = 1;
+        }
+        Map<String, Object> parameters = ImmutableMap.of(
+            KNNConstants.SPACE_TYPE,
+            SpaceType.HAMMING.getValue(),
+            KNNConstants.INDEX_DESCRIPTION_PARAMETER,
+            "BHNSW32",
+            KNNConstants.VECTOR_DATA_TYPE_FIELD,
+            VectorDataType.BINARY.getValue()
+        );
+        long vectorMemoryAddress = JNICommons.storeByteVectorData(0, vectors, numVectors * dataLength);
+        JNIService.createIndex(ids, vectorMemoryAddress, dimension, path, parameters, knnEngine);
+
+        // Load index into memory
+        long memoryAddress = JNIService.loadIndex(path, parameters, knnEngine);
+
+        @SuppressWarnings("unchecked")
+        WatcherHandle<FileWatcher> watcherHandle = (WatcherHandle<FileWatcher>) mock(WatcherHandle.class);
+        doNothing().when(watcherHandle).stop();
+
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        NativeMemoryAllocation.IndexAllocation indexAllocation = new NativeMemoryAllocation.IndexAllocation(
+            executorService,
+            memoryAddress,
+            IndexUtil.getFileSizeInKB(path),
+            knnEngine,
+            path,
+            "test",
+            watcherHandle,
+            null,
+            true
         );
 
         indexAllocation.close();
@@ -250,7 +315,8 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
         NativeMemoryAllocation.TrainingDataAllocation trainingDataAllocation = new NativeMemoryAllocation.TrainingDataAllocation(
             executorService,
             memoryAddress,
-            0
+            0,
+            VectorDataType.FLOAT
         );
 
         trainingDataAllocation.close();
@@ -276,7 +342,8 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
         NativeMemoryAllocation.TrainingDataAllocation trainingDataAllocation = new NativeMemoryAllocation.TrainingDataAllocation(
             null,
             memoryAddress,
-            0
+            0,
+            VectorDataType.FLOAT
         );
 
         assertEquals(memoryAddress, trainingDataAllocation.getMemoryAddress());
@@ -289,7 +356,8 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
         NativeMemoryAllocation.TrainingDataAllocation trainingDataAllocation = new NativeMemoryAllocation.TrainingDataAllocation(
             null,
             0,
-            0
+            0,
+            VectorDataType.FLOAT
         );
 
         int initialValue = 10;
@@ -322,7 +390,8 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
         NativeMemoryAllocation.TrainingDataAllocation trainingDataAllocation = new NativeMemoryAllocation.TrainingDataAllocation(
             null,
             0,
-            0
+            0,
+            VectorDataType.FLOAT
         );
 
         int initialValue = 10;
@@ -357,7 +426,8 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
         NativeMemoryAllocation.TrainingDataAllocation trainingDataAllocation = new NativeMemoryAllocation.TrainingDataAllocation(
             null,
             0,
-            size
+            size,
+            VectorDataType.FLOAT
         );
 
         assertEquals(size, trainingDataAllocation.getSizeInKB());
@@ -369,7 +439,8 @@ public class NativeMemoryAllocationTests extends KNNTestCase {
         NativeMemoryAllocation.TrainingDataAllocation trainingDataAllocation = new NativeMemoryAllocation.TrainingDataAllocation(
             null,
             pointer,
-            0
+            0,
+            VectorDataType.FLOAT
         );
 
         assertEquals(pointer, trainingDataAllocation.getMemoryAddress());

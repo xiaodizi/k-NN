@@ -11,11 +11,7 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.common.KNNConstants;
-import org.opensearch.knn.index.KNNMethod;
-import org.opensearch.knn.index.KNNMethodContext;
-import org.opensearch.knn.index.MethodComponent;
-import org.opensearch.knn.index.MethodComponentContext;
-import org.opensearch.knn.index.SpaceType;
+import org.opensearch.knn.index.*;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -77,6 +73,28 @@ public class AbstractKNNLibraryTests extends KNNTestCase {
         assertNotNull(testAbstractKNNLibrary2.validateMethod(knnMethodContext2));
     }
 
+    public void testEngineSpecificMethods() {
+        String methodName1 = "test-method-1";
+        QueryContext engineSpecificMethodContext = new QueryContext(VectorQueryType.K);
+        EngineSpecificMethodContext context = ctx -> ImmutableMap.of(
+            "myparameter",
+            new Parameter.BooleanParameter("myparameter", null, value -> true)
+        );
+
+        TestAbstractKNNLibrary testAbstractKNNLibrary1 = new TestAbstractKNNLibrary(
+            Collections.emptyMap(),
+            Map.of(methodName1, context),
+            ""
+        );
+
+        assertNotNull(testAbstractKNNLibrary1.getMethodContext(methodName1));
+        assertTrue(
+            testAbstractKNNLibrary1.getMethodContext(methodName1)
+                .supportedMethodParameters(engineSpecificMethodContext)
+                .containsKey("myparameter")
+        );
+    }
+
     public void testGetMethodAsMap() {
         String methodName = "test-method-1";
         SpaceType spaceType = SpaceType.DEFAULT;
@@ -109,7 +127,15 @@ public class AbstractKNNLibraryTests extends KNNTestCase {
 
     private static class TestAbstractKNNLibrary extends AbstractKNNLibrary {
         public TestAbstractKNNLibrary(Map<String, KNNMethod> methods, String currentVersion) {
-            super(methods, currentVersion);
+            super(methods, Collections.emptyMap(), currentVersion);
+        }
+
+        public TestAbstractKNNLibrary(
+            Map<String, KNNMethod> methods,
+            Map<String, EngineSpecificMethodContext> engineSpecificMethodContextMap,
+            String currentVersion
+        ) {
+            super(methods, engineSpecificMethodContextMap, currentVersion);
         }
 
         @Override

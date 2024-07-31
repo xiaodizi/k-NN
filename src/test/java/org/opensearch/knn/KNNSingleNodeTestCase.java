@@ -5,6 +5,7 @@
 
 package org.opensearch.knn;
 
+import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -37,12 +38,25 @@ import org.opensearch.test.OpenSearchSingleNodeTestCase;
 import org.opensearch.test.hamcrest.OpenSearchAssertions;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 import static org.mockito.Mockito.when;
-import static org.opensearch.knn.common.KNNConstants.*;
+import static org.opensearch.knn.common.KNNConstants.DIMENSION;
+import static org.opensearch.knn.common.KNNConstants.KNN_ENGINE;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_SPACE_TYPE;
+import static org.opensearch.knn.common.KNNConstants.MODEL_BLOB_PARAMETER;
+import static org.opensearch.knn.common.KNNConstants.MODEL_DESCRIPTION;
+import static org.opensearch.knn.common.KNNConstants.MODEL_ERROR;
+import static org.opensearch.knn.common.KNNConstants.MODEL_ID;
 import static org.opensearch.knn.common.KNNConstants.MODEL_INDEX_NAME;
+import static org.opensearch.knn.common.KNNConstants.MODEL_STATE;
+import static org.opensearch.knn.common.KNNConstants.MODEL_TIMESTAMP;
+import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 
 public class KNNSingleNodeTestCase extends OpenSearchSingleNodeTestCase {
     @Override
@@ -184,7 +198,7 @@ public class KNNSingleNodeTestCase extends OpenSearchSingleNodeTestCase {
     /**
      * Index a new model
      */
-    protected void addDoc(Model model) throws IOException, ExecutionException, InterruptedException {
+    protected void writeModelToModelSystemIndex(Model model) throws IOException, ExecutionException, InterruptedException {
         ModelMetadata modelMetadata = model.getModelMetadata();
 
         XContentBuilder builder = XContentFactory.jsonBuilder()
@@ -196,7 +210,8 @@ public class KNNSingleNodeTestCase extends OpenSearchSingleNodeTestCase {
             .field(MODEL_STATE, modelMetadata.getState().getName())
             .field(MODEL_TIMESTAMP, modelMetadata.getTimestamp().toString())
             .field(MODEL_DESCRIPTION, modelMetadata.getDescription())
-            .field(MODEL_ERROR, modelMetadata.getError());
+            .field(MODEL_ERROR, modelMetadata.getError())
+            .field(VECTOR_DATA_TYPE_FIELD, modelMetadata.getVectorDataType().getValue());
 
         if (model.getModelBlob() != null) {
             builder.field(MODEL_BLOB_PARAMETER, Base64.getEncoder().encodeToString(model.getModelBlob()));
@@ -211,6 +226,22 @@ public class KNNSingleNodeTestCase extends OpenSearchSingleNodeTestCase {
 
         IndexResponse response = client().index(indexRequest).get();
         assertTrue(response.status() == RestStatus.CREATED || response.status() == RestStatus.OK);
+    }
+
+    // Add a new model to ModelDao
+    protected void addModel(Model model) throws IOException {
+        ModelDao modelDao = ModelDao.OpenSearchKNNModelDao.getInstance();
+        modelDao.put(model, new ActionListener<IndexResponse>() {
+            @Override
+            public void onResponse(IndexResponse indexResponse) {
+                assertTrue(indexResponse.status() == RestStatus.CREATED || indexResponse.status() == RestStatus.OK);
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                fail("Failed to add model: " + e);
+            }
+        });
     }
 
     /**

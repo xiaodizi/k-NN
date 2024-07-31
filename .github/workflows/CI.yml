@@ -6,10 +6,32 @@ on:
     branches:
       - "*"
       - "feature/**"
+    paths:
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'src/**'
+      - 'build-tools/**'
+      - 'buildSrc/**'
+      - 'gradle/**'
+      - 'jni/**'
+      - 'micro-benchmarks/**'
+      - '.github/workflows/CI.yml'
   pull_request:
     branches:
       - "*"
       - "feature/**"
+    paths:
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'src/**'
+      - 'build-tools/**'
+      - 'buildSrc/**'
+      - 'gradle/**'
+      - 'jni/**'
+      - 'micro-benchmarks/**'
+      - '.github/workflows/CI.yml'
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   Get-CI-Image-Tag:
@@ -35,8 +57,6 @@ jobs:
     steps:
       - name: Checkout k-NN
         uses: actions/checkout@v1
-        with:
-          submodules: true
 
       # Setup git user so that patches for native libraries can be applied and committed
       - name: Setup git user

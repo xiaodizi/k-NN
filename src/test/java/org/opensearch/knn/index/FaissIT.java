@@ -22,6 +22,7 @@ import org.opensearch.client.Response;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.client.ResponseException;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.knn.KNNRestTestCase;
@@ -37,15 +38,14 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import static org.opensearch.knn.common.KNNConstants.DIMENSION;
 import static org.opensearch.knn.common.KNNConstants.ENCODER_PARAMETER_PQ_CODE_SIZE;
 import static org.opensearch.knn.common.KNNConstants.ENCODER_PARAMETER_PQ_M;
 import static org.opensearch.knn.common.KNNConstants.ENCODER_PQ;
@@ -57,17 +57,25 @@ import static org.opensearch.knn.common.KNNConstants.FAISS_SQ_TYPE;
 import static org.opensearch.knn.common.KNNConstants.FP16_MAX_VALUE;
 import static org.opensearch.knn.common.KNNConstants.FP16_MIN_VALUE;
 import static org.opensearch.knn.common.KNNConstants.KNN_ENGINE;
+import static org.opensearch.knn.common.KNNConstants.KNN_METHOD;
 import static org.opensearch.knn.common.KNNConstants.MAX_DISTANCE;
 import static org.opensearch.knn.common.KNNConstants.METHOD_ENCODER_PARAMETER;
 import static org.opensearch.knn.common.KNNConstants.METHOD_HNSW;
 import static org.opensearch.knn.common.KNNConstants.METHOD_IVF;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_M;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_NLIST;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_NPROBES;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_SPACE_TYPE;
 import static org.opensearch.knn.common.KNNConstants.MIN_SCORE;
+import static org.opensearch.knn.common.KNNConstants.MODEL_DESCRIPTION;
 import static org.opensearch.knn.common.KNNConstants.MODEL_ID;
 import static org.opensearch.knn.common.KNNConstants.NAME;
 import static org.opensearch.knn.common.KNNConstants.PARAMETERS;
+import static org.opensearch.knn.common.KNNConstants.TRAIN_FIELD_PARAMETER;
+import static org.opensearch.knn.common.KNNConstants.TRAIN_INDEX_PARAMETER;
+import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 
 public class FaissIT extends KNNRestTestCase {
     private static final String DOC_ID_1 = "doc1";
@@ -75,6 +83,15 @@ public class FaissIT extends KNNRestTestCase {
     private static final String DOC_ID_3 = "doc3";
     private static final String COLOR_FIELD_NAME = "color";
     private static final String TASTE_FIELD_NAME = "taste";
+
+    private static final String DIMENSION_FIELD_NAME = "dimension";
+    private static final int VECTOR_DIMENSION = 3;
+    private static final String KNN_VECTOR_TYPE = "knn_vector";
+    private static final String PROPERTIES_FIELD_NAME = "properties";
+    private static final String TYPE_FIELD_NAME = "type";
+    private static final String INTEGER_FIELD_NAME = "int_field";
+    private static final String FILED_TYPE_INTEGER = "integer";
+    private static final String NON_EXISTENT_INTEGER_FIELD_NAME = "nonexistent_int_field";
 
     static TestUtils.TestData testData;
 
@@ -88,197 +105,6 @@ public class FaissIT extends KNNRestTestCase {
         assert testIndexVectors != null;
         assert testQueries != null;
         testData = new TestUtils.TestData(testIndexVectors.getPath(), testQueries.getPath());
-    }
-
-    @SneakyThrows
-    public void testEndToEnd_whenMethodIsHNSWFlat_thenSucceed() {
-        String indexName = "test-index-1";
-        String fieldName = "test-field-1";
-
-        KNNMethod hnswMethod = KNNEngine.FAISS.getMethod(METHOD_HNSW);
-        SpaceType spaceType = SpaceType.L2;
-
-        List<Integer> mValues = ImmutableList.of(16, 32, 64, 128);
-        List<Integer> efConstructionValues = ImmutableList.of(16, 32, 64, 128);
-        List<Integer> efSearchValues = ImmutableList.of(16, 32, 64, 128);
-
-        Integer dimension = testData.indexData.vectors[0].length;
-
-        // Create an index
-        XContentBuilder builder = XContentFactory.jsonBuilder()
-            .startObject()
-            .startObject("properties")
-            .startObject(fieldName)
-            .field("type", "knn_vector")
-            .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
-            .field(NAME, hnswMethod.getMethodComponent().getName())
-            .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
-            .field(KNN_ENGINE, KNNEngine.FAISS.getName())
-            .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
-            .endObject()
-            .endObject()
-            .endObject()
-            .endObject()
-            .endObject();
-
-        Map<String, Object> mappingMap = xContentBuilderToMap(builder);
-        String mapping = builder.toString();
-
-        createKnnIndex(indexName, mapping);
-        assertEquals(new TreeMap<>(mappingMap), new TreeMap<>(getIndexMappingAsMap(indexName)));
-
-        // Index the test data
-        for (int i = 0; i < testData.indexData.docs.length; i++) {
-            addKnnDoc(
-                indexName,
-                Integer.toString(testData.indexData.docs[i]),
-                fieldName,
-                Floats.asList(testData.indexData.vectors[i]).toArray()
-            );
-        }
-
-        // Assert we have the right number of documents in the index
-        refreshAllNonSystemIndices();
-        assertEquals(testData.indexData.docs.length, getDocCount(indexName));
-
-        int k = 10;
-        for (int i = 0; i < testData.queries.length; i++) {
-            Response response = searchKNNIndex(indexName, new KNNQueryBuilder(fieldName, testData.queries[i], k), k);
-            String responseBody = EntityUtils.toString(response.getEntity());
-            List<KNNResult> knnResults = parseSearchResponse(responseBody, fieldName);
-            assertEquals(k, knnResults.size());
-
-            List<Float> actualScores = parseSearchResponseScore(responseBody, fieldName);
-            for (int j = 0; j < k; j++) {
-                float[] primitiveArray = knnResults.get(j).getVector();
-                assertEquals(
-                    KNNEngine.FAISS.score(KNNScoringUtil.l2Squared(testData.queries[i], primitiveArray), spaceType),
-                    actualScores.get(j),
-                    0.0001
-                );
-            }
-        }
-
-        // Delete index
-        deleteKNNIndex(indexName);
-
-        // Search every 5 seconds 14 times to confirm graph gets evicted
-        int intervals = 14;
-        for (int i = 0; i < intervals; i++) {
-            if (getTotalGraphsInCache() == 0) {
-                return;
-            }
-
-            Thread.sleep(5 * 1000);
-        }
-
-        fail("Graphs are not getting evicted");
-    }
-
-    @SneakyThrows
-    public void testEndToEnd_whenMethodIsHNSWFlatAndHasDeletedDocs_thenSucceed() {
-        String indexName = "test-index-1";
-        String fieldName = "test-field-1";
-
-        KNNMethod hnswMethod = KNNEngine.FAISS.getMethod(METHOD_HNSW);
-        SpaceType spaceType = SpaceType.L2;
-
-        List<Integer> mValues = ImmutableList.of(16, 32, 64, 128);
-        List<Integer> efConstructionValues = ImmutableList.of(16, 32, 64, 128);
-        List<Integer> efSearchValues = ImmutableList.of(16, 32, 64, 128);
-
-        Integer dimension = testData.indexData.vectors[0].length;
-
-        // Create an index
-        XContentBuilder builder = XContentFactory.jsonBuilder()
-            .startObject()
-            .startObject("properties")
-            .startObject(fieldName)
-            .field("type", "knn_vector")
-            .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
-            .field(NAME, hnswMethod.getMethodComponent().getName())
-            .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
-            .field(KNN_ENGINE, KNNEngine.FAISS.getName())
-            .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
-            .endObject()
-            .endObject()
-            .endObject()
-            .endObject()
-            .endObject();
-
-        Map<String, Object> mappingMap = xContentBuilderToMap(builder);
-        String mapping = builder.toString();
-
-        createKnnIndex(indexName, mapping);
-        assertEquals(new TreeMap<>(mappingMap), new TreeMap<>(getIndexMappingAsMap(indexName)));
-
-        // Index the test data
-        for (int i = 0; i < testData.indexData.docs.length; i++) {
-            addKnnDoc(
-                indexName,
-                Integer.toString(testData.indexData.docs[i]),
-                fieldName,
-                Floats.asList(testData.indexData.vectors[i]).toArray()
-            );
-        }
-
-        // Assert we have the right number of documents in the index
-        refreshAllNonSystemIndices();
-        assertEquals(testData.indexData.docs.length, getDocCount(indexName));
-
-        final Set<Integer> docIdsToBeDeleted = new HashSet<>();
-        while (docIdsToBeDeleted.size() < 10) {
-            docIdsToBeDeleted.add(randomInt(testData.indexData.docs.length - 1));
-        }
-
-        for (Integer id : docIdsToBeDeleted) {
-            deleteKnnDoc(indexName, Integer.toString(testData.indexData.docs[id]));
-        }
-        refreshAllNonSystemIndices();
-        forceMergeKnnIndex(indexName, 3);
-
-        assertEquals(testData.indexData.docs.length - 10, getDocCount(indexName));
-
-        int k = 10;
-        for (int i = 0; i < testData.queries.length; i++) {
-            Response response = searchKNNIndex(indexName, new KNNQueryBuilder(fieldName, testData.queries[i], k), k);
-            String responseBody = EntityUtils.toString(response.getEntity());
-            List<KNNResult> knnResults = parseSearchResponse(responseBody, fieldName);
-            assertEquals(k, knnResults.size());
-
-            List<Float> actualScores = parseSearchResponseScore(responseBody, fieldName);
-            for (int j = 0; j < k; j++) {
-                float[] primitiveArray = knnResults.get(j).getVector();
-                assertEquals(
-                    KNNEngine.FAISS.score(KNNScoringUtil.l2Squared(testData.queries[i], primitiveArray), spaceType),
-                    actualScores.get(j),
-                    0.0001
-                );
-            }
-        }
-
-        // Delete index
-        deleteKNNIndex(indexName);
-
-        // Search every 5 seconds 14 times to confirm graph gets evicted
-        int intervals = 14;
-        for (int i = 0; i < intervals; i++) {
-            if (getTotalGraphsInCache() == 0) {
-                return;
-            }
-
-            Thread.sleep(5 * 1000);
-        }
-
-        fail("Graphs are not getting evicted");
     }
 
     @SneakyThrows
@@ -299,13 +125,13 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(FIELD_NAME)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .endObject()
             .endObject()
@@ -334,7 +160,7 @@ public class FaissIT extends KNNRestTestCase {
         assertEquals(testData.indexData.docs.length, getDocCount(INDEX_NAME));
 
         float distance = 300000000000f;
-        validateRadiusSearchResults(INDEX_NAME, FIELD_NAME, testData.queries, distance, null, spaceType, null);
+        validateRadiusSearchResults(INDEX_NAME, FIELD_NAME, testData.queries, distance, null, spaceType, null, null);
 
         // Delete index
         deleteKNNIndex(INDEX_NAME);
@@ -358,13 +184,13 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(FIELD_NAME)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .endObject()
             .endObject()
@@ -394,7 +220,7 @@ public class FaissIT extends KNNRestTestCase {
 
         float score = 0.00001f;
 
-        validateRadiusSearchResults(INDEX_NAME, FIELD_NAME, testData.queries, null, score, spaceType, null);
+        validateRadiusSearchResults(INDEX_NAME, FIELD_NAME, testData.queries, null, score, spaceType, null, null);
 
         // Delete index
         deleteKNNIndex(INDEX_NAME);
@@ -418,13 +244,13 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(FIELD_NAME)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .endObject()
             .endObject()
@@ -454,7 +280,7 @@ public class FaissIT extends KNNRestTestCase {
 
         float score = 5f;
 
-        validateRadiusSearchResults(INDEX_NAME, FIELD_NAME, testData.queries, null, score, spaceType, null);
+        validateRadiusSearchResults(INDEX_NAME, FIELD_NAME, testData.queries, null, score, spaceType, null, null);
 
         // Delete index
         deleteKNNIndex(INDEX_NAME);
@@ -488,8 +314,8 @@ public class FaissIT extends KNNRestTestCase {
             .field(NAME, METHOD_HNSW)
             .field(KNN_ENGINE, FAISS_NAME)
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .startObject(METHOD_ENCODER_PARAMETER)
             .field(NAME, ENCODER_PQ)
@@ -538,8 +364,11 @@ public class FaissIT extends KNNRestTestCase {
         assertEquals(testData.indexData.docs.length, getDocCount(indexName));
 
         float distance = 300000000000f;
+        // create method parameter wih ef_search
+        Map<String, Object> methodParameters = new ImmutableMap.Builder<String, Object>().put(KNNConstants.METHOD_PARAMETER_EF_SEARCH, 150)
+            .build();
 
-        validateRadiusSearchResults(indexName, fieldName, testData.queries, distance, null, spaceType, null);
+        validateRadiusSearchResults(indexName, fieldName, testData.queries, distance, null, spaceType, null, methodParameters);
 
         // Delete index
         deleteKNNIndex(indexName);
@@ -574,7 +403,8 @@ public class FaissIT extends KNNRestTestCase {
             distance,
             null,
             SpaceType.L2,
-            termQueryBuilder
+            termQueryBuilder,
+            null
         );
 
         assertEquals(1, queryResult.get(0).size());
@@ -612,8 +442,8 @@ public class FaissIT extends KNNRestTestCase {
             .field(NAME, METHOD_HNSW)
             .field(KNN_ENGINE, FAISS_NAME)
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .startObject(METHOD_ENCODER_PARAMETER)
             .field(NAME, ENCODER_PQ)
@@ -719,13 +549,13 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(fieldName)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .startObject(METHOD_ENCODER_PARAMETER)
             .field(NAME, ENCODER_SQ)
@@ -805,6 +635,7 @@ public class FaissIT extends KNNRestTestCase {
 
         indexTestData(indexName, fieldName, dimension, numDocs);
         queryTestData(indexName, fieldName, dimension, numDocs);
+        queryTestData(indexName, fieldName, dimension, numDocs, Map.of("nprobes", 100));
         deleteKNNIndex(indexName);
         validateGraphEviction();
     }
@@ -832,13 +663,13 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(fieldName)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .startObject(METHOD_ENCODER_PARAMETER)
             .field(NAME, ENCODER_SQ)
@@ -932,13 +763,13 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(fieldName)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, SpaceType.L2.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
-            .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_SEARCH, efSearchValues.get(random().nextInt(efSearchValues.size())))
             .startObject(METHOD_ENCODER_PARAMETER)
             .field(NAME, ENCODER_SQ)
@@ -1185,7 +1016,7 @@ public class FaissIT extends KNNRestTestCase {
             .field(NAME, METHOD_HNSW)
             .field(KNN_ENGINE, FAISS_NAME)
             .startObject(PARAMETERS)
-            .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
+            .field(METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
             .startObject(METHOD_ENCODER_PARAMETER)
             .field(NAME, ENCODER_PQ)
             .startObject(PARAMETERS)
@@ -1392,7 +1223,7 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(fieldName)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
@@ -1428,7 +1259,7 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(fieldName)
             .field("type", "knn_vector")
             .field("dimension", dimension)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, hnswMethod.getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, spaceType.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
@@ -1606,7 +1437,7 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(FIELD_NAME)
             .field("type", "knn_vector")
             .field("dimension", 2)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, KNNEngine.FAISS.getMethod(METHOD_HNSW).getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, SpaceType.INNER_PRODUCT.getValue())
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
@@ -1781,6 +1612,187 @@ public class FaissIT extends KNNRestTestCase {
         );
     }
 
+    @SneakyThrows
+    public void testIVF_whenBinaryFormat_whenIVF_thenSuccess() {
+        String modelId = "test-model-ivf-binary";
+        int dimension = 8;
+
+        String trainingIndexName = "train-index-ivf-binary";
+        String trainingFieldName = "train-field-ivf-binary";
+
+        String trainIndexMapping = XContentFactory.jsonBuilder()
+            .startObject()
+            .startObject("properties")
+            .startObject(trainingFieldName)
+            .field("type", "knn_vector")
+            .field("dimension", dimension)
+            .field("data_type", VectorDataType.BINARY.getValue())
+            .startObject(KNN_METHOD)
+            .field(NAME, KNNEngine.FAISS.getMethod(METHOD_HNSW).getMethodComponent().getName())
+            .field(METHOD_PARAMETER_SPACE_TYPE, SpaceType.HAMMING.getValue())
+            .field(KNN_ENGINE, KNNEngine.FAISS.getName())
+            .startObject(PARAMETERS)
+            .field(METHOD_PARAMETER_M, 24)
+            .field(METHOD_PARAMETER_EF_CONSTRUCTION, 128)
+            .endObject()
+            .endObject()
+            .endObject()
+            .endObject()
+            .endObject()
+            .toString();
+
+        createKnnIndex(trainingIndexName, trainIndexMapping);
+
+        int trainingDataCount = 40;
+        bulkIngestRandomBinaryVectors(trainingIndexName, trainingFieldName, trainingDataCount, dimension);
+
+        XContentBuilder trainModelXContentBuilder = XContentFactory.jsonBuilder()
+            .startObject()
+            .field(TRAIN_INDEX_PARAMETER, trainingIndexName)
+            .field(TRAIN_FIELD_PARAMETER, trainingFieldName)
+            .field(DIMENSION, dimension)
+            .field(MODEL_DESCRIPTION, "My model description")
+            .field(VECTOR_DATA_TYPE_FIELD, VectorDataType.BINARY.getValue())
+            .field(
+                KNN_METHOD,
+                Map.of(
+                    NAME,
+                    METHOD_IVF,
+                    KNN_ENGINE,
+                    FAISS_NAME,
+                    METHOD_PARAMETER_SPACE_TYPE,
+                    SpaceType.HAMMING.getValue(),
+                    PARAMETERS,
+                    Map.of(METHOD_PARAMETER_NLIST, 1, METHOD_PARAMETER_NPROBES, 1)
+                )
+            )
+            .endObject();
+
+        trainModel(modelId, trainModelXContentBuilder);
+
+        // Make sure training succeeds after 30 seconds
+        assertTrainingSucceeds(modelId, 30, 1000);
+
+        // Create knn index from model
+        String fieldName = "test-field-name-ivf-binary";
+        String indexName = "test-index-name-ivf-binary";
+        String indexMapping = XContentFactory.jsonBuilder()
+            .startObject()
+            .startObject("properties")
+            .startObject(fieldName)
+            .field("type", "knn_vector")
+            .field(MODEL_ID, modelId)
+            .endObject()
+            .endObject()
+            .endObject()
+            .toString();
+
+        createKnnIndex(indexName, getKNNDefaultIndexSettings(), indexMapping);
+        Integer[] vector1 = { 11 };
+        Integer[] vector2 = { 22 };
+        Integer[] vector3 = { 33 };
+        Integer[] vector4 = { 44 };
+        addKnnDoc(indexName, "1", fieldName, vector1);
+        addKnnDoc(indexName, "2", fieldName, vector2);
+        addKnnDoc(indexName, "3", fieldName, vector3);
+        addKnnDoc(indexName, "4", fieldName, vector4);
+
+        Integer[] queryVector = { 15 };
+        int k = 2;
+
+        XContentBuilder queryBuilder = XContentFactory.jsonBuilder()
+            .startObject()
+            .startObject("query")
+            .startObject("knn")
+            .startObject(fieldName)
+            .field("vector", queryVector)
+            .field("k", k)
+            .endObject()
+            .endObject()
+            .endObject()
+            .endObject();
+        Response searchResponse = searchKNNIndex(indexName, queryBuilder, k);
+        List<KNNResult> results = parseSearchResponse(EntityUtils.toString(searchResponse.getEntity()), fieldName);
+        assertEquals(k, results.size());
+
+        deleteKNNIndex(indexName);
+        Thread.sleep(45 * 1000);
+        deleteModel(modelId);
+        deleteKNNIndex(trainingIndexName);
+        validateGraphEviction();
+    }
+
+    @SneakyThrows
+    public void testQueryWithFilter_whenNonExistingFieldUsedInFilter_thenSuccessful() {
+        XContentBuilder builder = XContentFactory.jsonBuilder()
+            .startObject()
+            .startObject(PROPERTIES_FIELD_NAME)
+            .startObject(FIELD_NAME)
+            .field(TYPE_FIELD_NAME, KNN_VECTOR_TYPE)
+            .field(DIMENSION_FIELD_NAME, VECTOR_DIMENSION)
+            .startObject(KNNConstants.KNN_METHOD)
+            .field(KNNConstants.NAME, KNNEngine.FAISS.getMethod(METHOD_HNSW).getMethodComponent().getName())
+            .field(KNNConstants.METHOD_PARAMETER_SPACE_TYPE, SpaceType.L2.getValue())
+            .field(KNNConstants.KNN_ENGINE, KNNEngine.LUCENE.getName())
+            .endObject()
+            .endObject()
+            .startObject(INTEGER_FIELD_NAME)
+            .field(TYPE_FIELD_NAME, FILED_TYPE_INTEGER)
+            .endObject()
+            .endObject()
+            .endObject();
+        Map<String, Object> mappingMap = xContentBuilderToMap(builder);
+        String mapping = builder.toString();
+
+        createKnnIndex(INDEX_NAME, mapping);
+
+        Float[] vector = new Float[] { 2.0f, 4.5f, 6.5f };
+
+        String documentAsString = XContentFactory.jsonBuilder()
+            .startObject()
+            .field(INTEGER_FIELD_NAME, 5)
+            .field(FIELD_NAME, vector)
+            .endObject()
+            .toString();
+
+        addKnnDoc(INDEX_NAME, DOC_ID_1, documentAsString);
+
+        refreshIndex(INDEX_NAME);
+        assertEquals(1, getDocCount(INDEX_NAME));
+
+        float[] searchVector = new float[] { 1.0f, 2.1f, 3.9f };
+        int k = 10;
+
+        // use filter where nonexistent field is must, we should have no results
+        QueryBuilder filterWithRequiredNonExistentField = QueryBuilders.boolQuery()
+            .must(QueryBuilders.rangeQuery(NON_EXISTENT_INTEGER_FIELD_NAME).gte(1));
+        Response searchWithRequiredNonExistentFiledInFilterResponse = searchKNNIndex(
+            INDEX_NAME,
+            new KNNQueryBuilder(FIELD_NAME, searchVector, k, filterWithRequiredNonExistentField),
+            k
+        );
+        List<KNNResult> resultsQuery1 = parseSearchResponse(
+            EntityUtils.toString(searchWithRequiredNonExistentFiledInFilterResponse.getEntity()),
+            FIELD_NAME
+        );
+        assertTrue(resultsQuery1.isEmpty());
+
+        // use filter with non existent field as optional, we should have some results
+        QueryBuilder filterWithOptionalNonExistentField = QueryBuilders.boolQuery()
+            .should(QueryBuilders.rangeQuery(NON_EXISTENT_INTEGER_FIELD_NAME).gte(1))
+            .must(QueryBuilders.rangeQuery(INTEGER_FIELD_NAME).gte(1));
+        Response searchWithOptionalNonExistentFiledInFilterResponse = searchKNNIndex(
+            INDEX_NAME,
+            new KNNQueryBuilder(FIELD_NAME, searchVector, k, filterWithOptionalNonExistentField),
+            k
+        );
+        List<KNNResult> resultsQuery2 = parseSearchResponse(
+            EntityUtils.toString(searchWithOptionalNonExistentFiledInFilterResponse.getEntity()),
+            FIELD_NAME
+        );
+        assertEquals(1, resultsQuery2.size());
+    }
+
     protected void setupKNNIndexForFilterQuery() throws Exception {
         // Create Mappings
         XContentBuilder builder = XContentFactory.jsonBuilder()
@@ -1789,7 +1801,7 @@ public class FaissIT extends KNNRestTestCase {
             .startObject(FIELD_NAME)
             .field("type", "knn_vector")
             .field("dimension", 3)
-            .startObject(KNNConstants.KNN_METHOD)
+            .startObject(KNN_METHOD)
             .field(NAME, KNNEngine.FAISS.getMethod(METHOD_HNSW).getMethodComponent().getName())
             .field(METHOD_PARAMETER_SPACE_TYPE, SpaceType.L2)
             .field(KNN_ENGINE, KNNEngine.FAISS.getName())
@@ -1812,13 +1824,23 @@ public class FaissIT extends KNNRestTestCase {
         refreshIndex(INDEX_NAME);
     }
 
-    private void queryTestData(final String indexName, final String fieldName, final int dimension, final int numDocs) throws IOException,
-        ParseException {
+    @SneakyThrows
+    private void queryTestData(final String indexName, final String fieldName, final int dimension, final int numDocs) {
+        queryTestData(indexName, fieldName, dimension, numDocs, null);
+    }
+
+    private void queryTestData(
+        final String indexName,
+        final String fieldName,
+        final int dimension,
+        final int numDocs,
+        Map<String, ?> methodParams
+    ) throws IOException, ParseException {
         float[] queryVector = new float[dimension];
         Arrays.fill(queryVector, (float) numDocs);
         int k = 10;
 
-        Response searchResponse = searchKNNIndex(indexName, new KNNQueryBuilder(fieldName, queryVector, k), k);
+        Response searchResponse = searchKNNIndex(indexName, buildSearchQuery(fieldName, k, queryVector, methodParams), k);
         List<KNNResult> results = parseSearchResponse(EntityUtils.toString(searchResponse.getEntity()), fieldName);
         assertEquals(k, results.size());
         for (int i = 0; i < k; i++) {
@@ -1859,7 +1881,8 @@ public class FaissIT extends KNNRestTestCase {
         Float distanceThreshold,
         Float scoreThreshold,
         final SpaceType spaceType,
-        TermQueryBuilder filterQuery
+        TermQueryBuilder filterQuery,
+        Map<String, ?> methodParameters
     ) throws IOException, ParseException {
         List<List<KNNResult>> queryResults = new ArrayList<>();
         for (float[] queryVector : queryVectors) {
@@ -1876,6 +1899,13 @@ public class FaissIT extends KNNRestTestCase {
             }
             if (filterQuery != null) {
                 queryBuilder.field("filter", filterQuery);
+            }
+            if (methodParameters != null) {
+                queryBuilder.startObject(METHOD_PARAMETER);
+                for (Map.Entry<String, ?> entry : methodParameters.entrySet()) {
+                    queryBuilder.field(entry.getKey(), entry.getValue());
+                }
+                queryBuilder.endObject();
             }
             queryBuilder.endObject();
             queryBuilder.endObject();

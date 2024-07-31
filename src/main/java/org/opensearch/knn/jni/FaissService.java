@@ -64,6 +64,20 @@ class FaissService {
     public static native void createIndex(int[] ids, long vectorsAddress, int dim, String indexPath, Map<String, Object> parameters);
 
     /**
+     * Create a binary index for the native library The memory occupied by the vectorsAddress will be freed up during the
+     * function call. So Java layer doesn't need to free up the memory. This is not an ideal behavior because Java layer
+     * created the memory address and that should only free up the memory. We are tracking the proper fix for this on this
+     * <a href="https://github.com/opensearch-project/k-NN/issues/1600">issue</a>
+     *
+     * @param ids array of ids mapping to the data passed in
+     * @param vectorsAddress address of native memory where vectors are stored
+     * @param dim dimension of the vector to be indexed
+     * @param indexPath path to save index file to
+     * @param parameters parameters to build index
+     */
+    public static native void createBinaryIndex(int[] ids, long vectorsAddress, int dim, String indexPath, Map<String, Object> parameters);
+
+    /**
      * Create an index for the native library with a provided template index
      *
      * @param ids array of ids mapping to the data passed in
@@ -83,12 +97,39 @@ class FaissService {
     );
 
     /**
+     * Create a binary index for the native library with a provided template index
+     *
+     * @param ids array of ids mapping to the data passed in
+     * @param vectorsAddress address of native memory where vectors are stored
+     * @param dim dimension of the vector to be indexed
+     * @param indexPath path to save index file to
+     * @param templateIndex empty template index
+     * @param parameters additional build time parameters
+     */
+    public static native void createBinaryIndexFromTemplate(
+        int[] ids,
+        long vectorsAddress,
+        int dim,
+        String indexPath,
+        byte[] templateIndex,
+        Map<String, Object> parameters
+    );
+
+    /**
      * Load an index into memory
      *
      * @param indexPath path to index file
      * @return pointer to location in memory the index resides in
      */
     public static native long loadIndex(String indexPath);
+
+    /**
+     * Load a binary index into memory
+     *
+     * @param indexPath path to index file
+     * @return pointer to location in memory the index resides in
+     */
+    public static native long loadBinaryIndex(String indexPath);
 
     /**
      * Determine if index contains shared state.
@@ -126,13 +167,62 @@ class FaissService {
      * @param indexPointer pointer to index in memory
      * @param queryVector vector to be used for query
      * @param k neighbors to be returned
+     * @param methodParameters method parameter
      * @param parentIds list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of k neighbors
      */
-    public static native KNNQueryResult[] queryIndex(long indexPointer, float[] queryVector, int k, int[] parentIds);
+    public static native KNNQueryResult[] queryIndex(
+        long indexPointer,
+        float[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        int[] parentIds
+    );
 
     /**
      * Query an index with filter
+     *
+     * @param indexPointer pointer to index in memory
+     * @param queryVector vector to be used for query
+     * @param k neighbors to be returned
+     * @param methodParameters method parameter
+     * @param filterIds list of doc ids to include in the query result
+     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @return KNNQueryResult array of k neighbors
+     */
+    public static native KNNQueryResult[] queryIndexWithFilter(
+        long indexPointer,
+        float[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        long[] filterIds,
+        int filterIdsType,
+        int[] parentIds
+    );
+
+    /**
+     * Query a binary index with filter
+     *
+     * @param indexPointer pointer to index in memory
+     * @param queryVector vector to be used for query
+     * @param k neighbors to be returned
+     * @param methodParameters method parameter
+     * @param filterIds list of doc ids to include in the query result
+     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @return KNNQueryResult array of k neighbors
+     */
+    public static native KNNQueryResult[] queryBinaryIndexWithFilter(
+        long indexPointer,
+        byte[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        long[] filterIds,
+        int filterIdsType,
+        int[] parentIds
+    );
+
+    /**
+     * Query a binary index with filter
      *
      * @param indexPointer pointer to index in memory
      * @param queryVector vector to be used for query
@@ -141,9 +231,9 @@ class FaissService {
      * @param parentIds list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of k neighbors
      */
-    public static native KNNQueryResult[] queryIndexWithFilter(
+    public static native KNNQueryResult[] queryBinaryIndexWithFilter(
         long indexPointer,
-        float[] queryVector,
+        byte[] queryVector,
         int k,
         long[] filterIds,
         int filterIdsType,
@@ -153,7 +243,7 @@ class FaissService {
     /**
      * Free native memory pointer
      */
-    public static native void free(long indexPointer);
+    public static native void free(long indexPointer, boolean isBinary);
 
     /**
      * Deallocate memory of the shared index state
@@ -179,6 +269,16 @@ class FaissService {
     public static native byte[] trainIndex(Map<String, Object> indexParameters, int dimension, long trainVectorsPointer);
 
     /**
+     * Train an empty binary index
+     *
+     * @param indexParameters parameters used to build index
+     * @param dimension dimension for the index
+     * @param trainVectorsPointer pointer to where training vectors are stored in native memory
+     * @return bytes array of trained template index
+     */
+    public static native byte[] trainBinaryIndex(Map<String, Object> indexParameters, int dimension, long trainVectorsPointer);
+
+    /**
      * <p>
      * The function is deprecated. Use {@link JNICommons#storeVectorData(long, float[][], long)}
      * </p>
@@ -197,6 +297,7 @@ class FaissService {
      * @param indexPointer pointer to index in memory
      * @param queryVector vector to be used for query
      * @param radius search within radius threshold
+     * @param methodParameters parameters to be used for the query
      * @param indexMaxResultWindow maximum number of results to return
      * @param filteredIds list of doc ids to include in the query result
      * @param filterIdsType type of filter ids
@@ -207,6 +308,7 @@ class FaissService {
         long indexPointer,
         float[] queryVector,
         float radius,
+        Map<String, ?> methodParameters,
         int indexMaxResultWindow,
         long[] filteredIds,
         int filterIdsType,
@@ -219,6 +321,7 @@ class FaissService {
      * @param indexPointer pointer to index in memory
      * @param queryVector vector to be used for query
      * @param radius search within radius threshold
+     * @param methodParameters parameters to be used for the query
      * @param indexMaxResultWindow maximum number of results to return
      * @param parentIds list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of neighbors within radius
@@ -227,6 +330,7 @@ class FaissService {
         long indexPointer,
         float[] queryVector,
         float radius,
+        Map<String, ?> methodParameters,
         int indexMaxResultWindow,
         int[] parentIds
     );

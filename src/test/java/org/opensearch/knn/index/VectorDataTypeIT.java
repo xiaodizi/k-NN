@@ -34,6 +34,7 @@ import java.util.Map;
 import static org.opensearch.knn.common.KNNConstants.DIMENSION;
 import static org.opensearch.knn.common.KNNConstants.LUCENE_NAME;
 import static org.opensearch.knn.common.KNNConstants.METHOD_HNSW;
+import static org.opensearch.knn.common.KNNConstants.NMSLIB_NAME;
 import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 import static org.opensearch.knn.index.VectorDataType.SUPPORTED_VECTOR_DATA_TYPES;
 
@@ -282,10 +283,10 @@ public class VectorDataTypeIT extends KNNRestTestCase {
                 .contains(
                     String.format(
                         Locale.ROOT,
-                        "[%s] field with value [%s] is only supported for [%s] engine",
+                        "[%s] field with value [%s] is not supported for [%s] engine",
                         VECTOR_DATA_TYPE_FIELD,
                         VectorDataType.BYTE.getValue(),
-                        LUCENE_NAME
+                        NMSLIB_NAME
                     )
                 )
         );
@@ -451,7 +452,7 @@ public class VectorDataTypeIT extends KNNRestTestCase {
 
         ResponseException ex = expectThrows(ResponseException.class, () -> client().performRequest(request));
         assertEquals(400, ex.getResponse().getStatusLine().getStatusCode());
-        assertTrue(ex.getMessage().contains("[knn] field 'vector' requires to be an array of numbers"));
+        assertTrue(ex.getMessage(), ex.getMessage().contains("[knn] failed to parse field [vector]"));
     }
 
     @SneakyThrows
@@ -473,7 +474,7 @@ public class VectorDataTypeIT extends KNNRestTestCase {
 
         ResponseException ex = expectThrows(ResponseException.class, () -> client().performRequest(request));
         assertEquals(400, ex.getResponse().getStatusLine().getStatusCode());
-        assertTrue(ex.getMessage().contains("[knn] field 'vector' requires to be non-null and non-empty"));
+        assertTrue(ex.getMessage().contains("[knn] requires query vector"));
     }
 
     @SneakyThrows

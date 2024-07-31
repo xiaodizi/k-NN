@@ -125,6 +125,7 @@ public class KNNIndexShardTests extends KNNSingleNodeTestCase {
         String fileExt = ".test";
         SpaceType spaceType = SpaceType.L2;
         String modelId = "test-model";
+        VectorDataType vectorDataType = VectorDataType.FLOAT;
 
         Set<String> includedFileNames = ImmutableSet.of(
             String.format("%s_111_%s%s", segmentName, fieldName, fileExt),
@@ -150,7 +151,8 @@ public class KNNIndexShardTests extends KNNSingleNodeTestCase {
             fileExt,
             path,
             spaceType,
-            modelId
+            modelId,
+            vectorDataType
         );
 
         assertEquals(includedFileNames.size(), included.size());

@@ -12,6 +12,8 @@
 package org.opensearch.knn.jni;
 
 import org.apache.commons.lang.ArrayUtils;
+import org.opensearch.common.Nullable;
+import org.opensearch.knn.index.IndexUtil;
 import org.opensearch.knn.index.query.KNNQueryResult;
 import org.opensearch.knn.index.util.KNNEngine;
 
@@ -21,7 +23,6 @@ import java.util.Map;
  * Service to distribute requests to the proper engine jni service
  */
 public class JNIService {
-
     /**
      * Create an index for the native library. The memory occupied by the vectorsAddress will be freed up during the
      * function call. So Java layer doesn't need to free up the memory. This is not an ideal behavior because Java layer
@@ -50,7 +51,11 @@ public class JNIService {
         }
 
         if (KNNEngine.FAISS == knnEngine) {
-            FaissService.createIndex(ids, vectorsAddress, dim, indexPath, parameters);
+            if (IndexUtil.isBinaryIndex(knnEngine, parameters)) {
+                FaissService.createBinaryIndex(ids, vectorsAddress, dim, indexPath, parameters);
+            } else {
+                FaissService.createIndex(ids, vectorsAddress, dim, indexPath, parameters);
+            }
             return;
         }
 
@@ -78,8 +83,13 @@ public class JNIService {
         KNNEngine knnEngine
     ) {
         if (KNNEngine.FAISS == knnEngine) {
-            FaissService.createIndexFromTemplate(ids, vectorsAddress, dim, indexPath, templateIndex, parameters);
-            return;
+            if (IndexUtil.isBinaryIndex(knnEngine, parameters)) {
+                FaissService.createBinaryIndexFromTemplate(ids, vectorsAddress, dim, indexPath, templateIndex, parameters);
+                return;
+            } else {
+                FaissService.createIndexFromTemplate(ids, vectorsAddress, dim, indexPath, templateIndex, parameters);
+                return;
+            }
         }
 
         throw new IllegalArgumentException(
@@ -101,7 +111,11 @@ public class JNIService {
         }
 
         if (KNNEngine.FAISS == knnEngine) {
-            return FaissService.loadIndex(indexPath);
+            if (IndexUtil.isBinaryIndex(knnEngine, parameters)) {
+                return FaissService.loadBinaryIndex(indexPath);
+            } else {
+                return FaissService.loadIndex(indexPath);
+            }
         }
 
         throw new IllegalArgumentException(String.format("LoadIndex not supported for provided engine : %s", knnEngine.getName()));
@@ -161,25 +175,27 @@ public class JNIService {
     /**
      * Query an index
      *
-     * @param indexPointer  pointer to index in memory
-     * @param queryVector   vector to be used for query
-     * @param k             neighbors to be returned
-     * @param knnEngine     engine to query index
-     * @param filteredIds   array of ints on which should be used for search.
-     * @param filterIdsType how to filter ids: Batch or BitMap
+     * @param indexPointer      pointer to index in memory
+     * @param queryVector       vector to be used for query
+     * @param k                 neighbors to be returned
+     * @param methodParameters  method parameter
+     * @param knnEngine         engine to query index
+     * @param filteredIds       array of ints on which should be used for search.
+     * @param filterIdsType     how to filter ids: Batch or BitMap
      * @return KNNQueryResult array of k neighbors
      */
     public static KNNQueryResult[] queryIndex(
         long indexPointer,
         float[] queryVector,
         int k,
+        @Nullable Map<String, ?> methodParameters,
         KNNEngine knnEngine,
         long[] filteredIds,
         int filterIdsType,
         int[] parentIds
     ) {
         if (KNNEngine.NMSLIB == knnEngine) {
-            return NmslibService.queryIndex(indexPointer, queryVector, k);
+            return NmslibService.queryIndex(indexPointer, queryVector, k, methodParameters);
         }
 
         if (KNNEngine.FAISS == knnEngine) {
@@ -188,11 +204,55 @@ public class JNIService {
             // filterIds. FilterIds is coming as empty then its the case where we need to do search with Faiss engine
             // normally.
             if (ArrayUtils.isNotEmpty(filteredIds)) {
-                return FaissService.queryIndexWithFilter(indexPointer, queryVector, k, filteredIds, filterIdsType, parentIds);
+                return FaissService.queryIndexWithFilter(
+                    indexPointer,
+                    queryVector,
+                    k,
+                    methodParameters,
+                    filteredIds,
+                    filterIdsType,
+                    parentIds
+                );
             }
-            return FaissService.queryIndex(indexPointer, queryVector, k, parentIds);
+            return FaissService.queryIndex(indexPointer, queryVector, k, methodParameters, parentIds);
         }
         throw new IllegalArgumentException(String.format("QueryIndex not supported for provided engine : %s", knnEngine.getName()));
+    }
+
+    /**
+     * Query a binary index
+     *
+     * @param indexPointer      pointer to index in memory
+     * @param queryVector       vector to be used for query
+     * @param k                 neighbors to be returned
+     * @param methodParameters  method parameter
+     * @param knnEngine         engine to query index
+     * @param filteredIds       array of ints on which should be used for search.
+     * @param filterIdsType     how to filter ids: Batch or BitMap
+     * @return KNNQueryResult array of k neighbors
+     */
+    public static KNNQueryResult[] queryBinaryIndex(
+        long indexPointer,
+        byte[] queryVector,
+        int k,
+        @Nullable Map<String, ?> methodParameters,
+        KNNEngine knnEngine,
+        long[] filteredIds,
+        int filterIdsType,
+        int[] parentIds
+    ) {
+        if (KNNEngine.FAISS == knnEngine) {
+            return FaissService.queryBinaryIndexWithFilter(
+                indexPointer,
+                queryVector,
+                k,
+                methodParameters,
+                ArrayUtils.isEmpty(filteredIds) ? null : filteredIds,
+                filterIdsType,
+                parentIds
+            );
+        }
+        throw new IllegalArgumentException(String.format("QueryBinaryIndex not supported for provided engine : %s", knnEngine.getName()));
     }
 
     /**
@@ -201,14 +261,25 @@ public class JNIService {
      * @param indexPointer location to be freed
      * @param knnEngine    engine to perform free
      */
-    public static void free(long indexPointer, KNNEngine knnEngine) {
+    public static void free(final long indexPointer, final KNNEngine knnEngine) {
+        free(indexPointer, knnEngine, false);
+    }
+
+    /**
+     * Free native memory pointer
+     *
+     * @param indexPointer  location to be freed
+     * @param knnEngine     engine to perform free
+     * @param isBinaryIndex indicate if it is binary index or not
+     */
+    public static void free(final long indexPointer, final KNNEngine knnEngine, final boolean isBinaryIndex) {
         if (KNNEngine.NMSLIB == knnEngine) {
             NmslibService.free(indexPointer);
             return;
         }
 
         if (KNNEngine.FAISS == knnEngine) {
-            FaissService.free(indexPointer);
+            FaissService.free(indexPointer, isBinaryIndex);
             return;
         }
 
@@ -242,6 +313,9 @@ public class JNIService {
      */
     public static byte[] trainIndex(Map<String, Object> indexParameters, int dimension, long trainVectorsPointer, KNNEngine knnEngine) {
         if (KNNEngine.FAISS == knnEngine) {
+            if (IndexUtil.isBinaryIndex(knnEngine, indexParameters)) {
+                return FaissService.trainBinaryIndex(indexParameters, dimension, trainVectorsPointer);
+            }
             return FaissService.trainIndex(indexParameters, dimension, trainVectorsPointer);
         }
 
@@ -269,6 +343,7 @@ public class JNIService {
      * @param indexPointer pointer to index in memory
      * @param queryVector vector to be used for query
      * @param radius search within radius threshold
+     * @param methodParameters parameters to be used when loading index
      * @param knnEngine engine to query index
      * @param indexMaxResultWindow maximum number of results to return
      * @param filteredIds list of doc ids to include in the query result
@@ -280,6 +355,7 @@ public class JNIService {
         long indexPointer,
         float[] queryVector,
         float radius,
+        @Nullable Map<String, ?> methodParameters,
         KNNEngine knnEngine,
         int indexMaxResultWindow,
         long[] filteredIds,
@@ -292,13 +368,14 @@ public class JNIService {
                     indexPointer,
                     queryVector,
                     radius,
+                    methodParameters,
                     indexMaxResultWindow,
                     filteredIds,
                     filterIdsType,
                     parentIds
                 );
             }
-            return FaissService.rangeSearchIndex(indexPointer, queryVector, radius, indexMaxResultWindow, parentIds);
+            return FaissService.rangeSearchIndex(indexPointer, queryVector, radius, methodParameters, indexMaxResultWindow, parentIds);
         }
         throw new IllegalArgumentException("RadiusQueryIndex not supported for provided engine");
     }

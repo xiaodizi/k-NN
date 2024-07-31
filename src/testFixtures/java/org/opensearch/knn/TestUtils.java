@@ -21,6 +21,8 @@ import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.codec.util.SerializationMode;
 import org.opensearch.knn.jni.JNICommons;
 import org.opensearch.knn.plugin.script.KNNScoringUtil;
+
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Random;
 import java.util.Set;
@@ -252,11 +254,22 @@ public class TestUtils {
      */
     public static class TestData {
         public Pair indexData;
+        public byte[][] indexBinaryData;
         public float[][] queries;
+        public String[][] groundTruthValues;
+        public byte[][] binaryQueries;
 
         public TestData(String testIndexVectorsPath, String testQueriesPath) throws IOException {
             indexData = readIndexData(testIndexVectorsPath);
             queries = readQueries(testQueriesPath);
+            initBinaryData();
+        }
+
+        public TestData(String testIndexVectorsPath, String testQueriesPath, String groundTruthValuesPath) throws IOException {
+            indexData = readIndexData(testIndexVectorsPath);
+            queries = readQueries(testQueriesPath);
+            groundTruthValues = readGroundTruthValues(groundTruthValuesPath);
+            initBinaryData();
         }
 
         private Pair readIndexData(String path) throws IOException {
@@ -275,10 +288,10 @@ public class TestUtils {
                 idsList.add((Integer) doc.get("id"));
 
                 @SuppressWarnings("unchecked")
-                ArrayList<Double> vector = (ArrayList<Double>) doc.get("vector");
+                ArrayList<Object> vector = (ArrayList<Object>) doc.get("vector");
                 Float[] floatArray = new Float[vector.size()];
                 for (int i = 0; i < vector.size(); i++) {
-                    floatArray[i] = vector.get(i).floatValue();
+                    floatArray[i] = Float.valueOf(vector.get(i).toString());
                 }
                 vectorsList.add(floatArray);
 
@@ -327,8 +340,68 @@ public class TestUtils {
             return queryArray;
         }
 
+        private String[][] readGroundTruthValues(String path) throws IOException {
+            BufferedReader reader = new BufferedReader(new FileReader(path));
+            String line = reader.readLine();
+
+            List<String[]> stringList = new ArrayList<>();
+
+            while (line != null) {
+                String[] intStrings = line.split(",");
+                stringList.add(intStrings);
+                line = reader.readLine();
+            }
+            reader.close();
+
+            String[][] docIdArray = new String[stringList.size()][stringList.get(0).length];
+            for (int i = 0; i < docIdArray.length; i++) {
+                for (int j = 0; j < docIdArray[i].length; j++) {
+                    docIdArray[i][j] = stringList.get(i)[j].trim();
+                }
+            }
+            return docIdArray;
+        }
+
+        private void initBinaryData() {
+            // Find medium value
+            List<Float> flattenedVectors = new ArrayList<>(indexData.vectors.length * indexData.vectors[0].length);
+            for (int i = 0; i < indexData.vectors.length; i++) {
+                for (int j = 0; j < indexData.vectors[i].length; j++) {
+                    flattenedVectors.add(indexData.vectors[i][j]);
+                }
+            }
+            Collections.sort(flattenedVectors);
+            Float median = flattenedVectors.get(flattenedVectors.size() / 2);
+
+            // Quantize(indexData.vectors[i][j] >= median ? 1 : 0) and
+            // packing(8 bits to 1 byte) for index data
+            indexBinaryData = new byte[indexData.vectors.length][(indexData.vectors[0].length + 7) / 8];
+            for (int i = 0; i < indexData.vectors.length; i++) {
+                for (int j = 0; j < indexData.vectors[i].length; j++) {
+                    int byteIndex = j / 8;
+                    int bitIndex = 7 - (j % 8);
+                    indexBinaryData[i][byteIndex] |= (indexData.vectors[i][j] >= median ? 1 : 0) << bitIndex;
+                }
+            }
+
+            // Quantize(queries[i][j] >= median ? 1 : 0) and
+            // packing(8 bits to 1 byte) for query data
+            binaryQueries = new byte[queries.length][(queries[0].length + 7) / 8];
+            for (int i = 0; i < queries.length; i++) {
+                for (int j = 0; j < queries[i].length; j++) {
+                    int byteIndex = j / 8;
+                    int bitIndex = 7 - (j % 8);
+                    binaryQueries[i][byteIndex] |= (queries[i][j] >= median ? 1 : 0) << bitIndex;
+                }
+            }
+        }
+
         public long loadDataToMemoryAddress() {
             return JNICommons.storeVectorData(0, indexData.vectors, (long) indexData.vectors.length * indexData.vectors[0].length);
+        }
+
+        public long loadBinaryDataToMemoryAddress() {
+            return JNICommons.storeByteVectorData(0, indexBinaryData, (long) indexBinaryData.length * indexBinaryData[0].length);
         }
 
         @AllArgsConstructor

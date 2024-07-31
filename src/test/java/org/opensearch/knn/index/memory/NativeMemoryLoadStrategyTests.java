@@ -16,12 +16,13 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.common.KNNConstants;
+import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.jni.JNICommons;
 import org.opensearch.knn.jni.JNIService;
 import org.opensearch.knn.index.query.KNNQueryResult;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.util.KNNEngine;
-import org.opensearch.knn.training.TrainingDataConsumer;
+import org.opensearch.knn.training.FloatTrainingDataConsumer;
 import org.opensearch.knn.training.VectorReader;
 import org.opensearch.watcher.ResourceWatcherService;
 
@@ -76,7 +77,66 @@ public class NativeMemoryLoadStrategyTests extends KNNTestCase {
         // Confirm that the file was loaded by querying
         float[] query = new float[dimension];
         Arrays.fill(query, numVectors + 1);
-        KNNQueryResult[] results = JNIService.queryIndex(indexAllocation.getMemoryAddress(), query, 2, knnEngine, null, 0, null);
+        KNNQueryResult[] results = JNIService.queryIndex(indexAllocation.getMemoryAddress(), query, 2, null, knnEngine, null, 0, null);
+        assertTrue(results.length > 0);
+    }
+
+    public void testLoad_whenFaissBinary_thenSuccess() throws IOException {
+        Path dir = createTempDir();
+        KNNEngine knnEngine = KNNEngine.FAISS;
+        String indexName = "test1" + knnEngine.getExtension();
+        String path = dir.resolve(indexName).toAbsolutePath().toString();
+        int numVectors = 10;
+        int dimension = 8;
+        int dataLength = dimension / 8;
+        int[] ids = new int[numVectors];
+        byte[][] vectors = new byte[numVectors][dataLength];
+        for (int i = 0; i < numVectors; i++) {
+            ids[i] = i;
+            vectors[i][0] = 1;
+        }
+        Map<String, Object> parameters = ImmutableMap.of(
+            KNNConstants.SPACE_TYPE,
+            SpaceType.HAMMING.getValue(),
+            KNNConstants.INDEX_DESCRIPTION_PARAMETER,
+            "BHNSW32",
+            KNNConstants.VECTOR_DATA_TYPE_FIELD,
+            VectorDataType.BINARY.getValue()
+        );
+        long memoryAddress = JNICommons.storeByteVectorData(0, vectors, numVectors);
+        JNIService.createIndex(ids, memoryAddress, dimension, path, parameters, knnEngine);
+
+        // Setup mock resource manager
+        ResourceWatcherService resourceWatcherService = mock(ResourceWatcherService.class);
+        doReturn(null).when(resourceWatcherService).add(any());
+        NativeMemoryLoadStrategy.IndexLoadStrategy.initialize(resourceWatcherService);
+
+        NativeMemoryEntryContext.IndexEntryContext indexEntryContext = new NativeMemoryEntryContext.IndexEntryContext(
+            path,
+            NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
+            parameters,
+            "test"
+        );
+
+        // Load
+        NativeMemoryAllocation.IndexAllocation indexAllocation = NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance()
+            .load(indexEntryContext);
+
+        // Verify
+        assertTrue(indexAllocation.isBinaryIndex());
+
+        // Confirm that the file was loaded by querying
+        byte[] query = { 1 };
+        KNNQueryResult[] results = JNIService.queryBinaryIndex(
+            indexAllocation.getMemoryAddress(),
+            query,
+            2,
+            null,
+            knnEngine,
+            null,
+            0,
+            null
+        );
         assertTrue(results.length > 0);
     }
 
@@ -90,12 +150,12 @@ public class NativeMemoryLoadStrategyTests extends KNNTestCase {
         logger.info("J0");
         doAnswer(invocationOnMock -> {
             logger.info("J1");
-            TrainingDataConsumer trainingDataConsumer = (TrainingDataConsumer) invocationOnMock.getArguments()[5];
+            FloatTrainingDataConsumer floatTrainingDataConsumer = (FloatTrainingDataConsumer) invocationOnMock.getArguments()[5];
             ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) invocationOnMock.getArguments()[6];
             Thread thread = new Thread(() -> {
                 try {
                     Thread.sleep(2000);
-                    trainingDataConsumer.accept(vectors); // Transfer some floats
+                    floatTrainingDataConsumer.accept(vectors); // Transfer some floats
                     listener.onResponse(null);
                 } catch (InterruptedException e) {
                     listener.onFailure(null);
@@ -116,7 +176,8 @@ public class NativeMemoryLoadStrategyTests extends KNNTestCase {
             NativeMemoryLoadStrategy.TrainingLoadStrategy.getInstance(),
             null,
             0,
-            0
+            0,
+            VectorDataType.FLOAT
         );
 
         // Load the allocation. Initially, the memory address should be 0. However, after the readlock is obtained,

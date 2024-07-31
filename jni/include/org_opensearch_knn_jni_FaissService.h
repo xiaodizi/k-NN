@@ -18,12 +18,21 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    createIndex
  * Signature: ([IJILjava/lang/String;Ljava/util/Map;)V
  */
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_createIndex
+        (JNIEnv *, jclass, jintArray, jlong, jint, jstring, jobject);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    createBinaryIndex
+ * Signature: ([IJILjava/lang/String;Ljava/util/Map;)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_createBinaryIndex
         (JNIEnv *, jclass, jintArray, jlong, jint, jstring, jobject);
 
 /*
@@ -36,10 +45,26 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_createIndexFromT
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    createBinaryIndexFromTemplate
+ * Signature: ([IJILjava/lang/String;[BLjava/util/Map;)V
+ */
+    JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_createBinaryIndexFromTemplate
+      (JNIEnv *, jclass, jintArray, jlong, jint, jstring, jbyteArray, jobject);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
  * Method:    loadIndex
  * Signature: (Ljava/lang/String;)J
  */
 JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_loadIndex
+  (JNIEnv *, jclass, jstring);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    loadBinaryIndex
+ * Signature: (Ljava/lang/String;)J
+ */
+JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_loadBinaryIndex
   (JNIEnv *, jclass, jstring);
 
 /*
@@ -69,26 +94,34 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_setSharedIndexSt
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    queryIndex
- * Signature: (J[FI[I)[Lorg/opensearch/knn/index/query/KNNQueryResult;
+ * Signature: (J[FILjava/util/Map[I)[Lorg/opensearch/knn/index/query/KNNQueryResult;
  */
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryIndex
-  (JNIEnv *, jclass, jlong, jfloatArray, jint, jintArray);
+  (JNIEnv *, jclass, jlong, jfloatArray, jint, jobject, jintArray);
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    queryIndexWithFilter
- * Signature: (J[FI[JI[I)[Lorg/opensearch/knn/index/query/KNNQueryResult;
+ * Signature: (J[FILjava/util/Map[JI[I)[Lorg/opensearch/knn/index/query/KNNQueryResult;
  */
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryIndexWithFilter
-  (JNIEnv *, jclass, jlong, jfloatArray, jint, jlongArray, jint, jintArray);
+  (JNIEnv *, jclass, jlong, jfloatArray, jint, jobject, jlongArray, jint, jintArray);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    queryBIndexWithFilter
+ * Signature: (J[BILjava/util/Map[JI[I)[Lorg/opensearch/knn/index/query/KNNQueryResult;
+ */
+JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryBinaryIndexWithFilter
+  (JNIEnv *, jclass, jlong, jbyteArray, jint, jobject, jlongArray, jint, jintArray);
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    free
- * Signature: (J)V
+ * Signature: (JZ)V
  */
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_free
-  (JNIEnv *, jclass, jlong);
+  (JNIEnv *, jclass, jlong, jboolean);
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
@@ -116,6 +149,14 @@ JNIEXPORT jbyteArray JNICALL Java_org_opensearch_knn_jni_FaissService_trainIndex
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    trainBinaryIndex
+ * Signature: (Ljava/util/Map;IJ)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_org_opensearch_knn_jni_FaissService_trainBinaryIndex
+  (JNIEnv *, jclass, jobject, jint, jlong);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
  * Method:    transferVectors
  * Signature: (J[[F)J
  */
@@ -125,18 +166,18 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_transferVectors
 /*
 * Class:     org_opensearch_knn_jni_FaissService
 * Method:    rangeSearchIndexWithFilter
-* Signature: (J[FJ[I)[Lorg/opensearch/knn/index/query/RangeQueryResult;
+* Signature: (J[FJLjava/util/MapI[JII)[Lorg/opensearch/knn/index/query/RangeQueryResult;
 */
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndexWithFilter
-  (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jint, jlongArray, jint, jintArray);
+  (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jlongArray, jint, jintArray);
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    rangeSearchIndex
- * Signature: (J[FJ[I)[Lorg/opensearch/knn/index/query/RangeQueryResult;
+ * Signature: (J[FJLjava/util/MapII)[Lorg/opensearch/knn/index/query/RangeQueryResult;
  */
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndex
-  (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jint, jintArray);
+  (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jintArray);
 
 #ifdef __cplusplus
 }

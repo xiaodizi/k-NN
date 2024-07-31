@@ -47,7 +47,7 @@ class Nmslib extends NativeLibrary {
                     )
                 )
                 .build()
-        ).addSpaces(SpaceType.L2, SpaceType.L1, SpaceType.LINF, SpaceType.COSINESIMIL, SpaceType.INNER_PRODUCT).build()
+        ).addSpaces(SpaceType.UNDEFINED, SpaceType.L2, SpaceType.L1, SpaceType.LINF, SpaceType.COSINESIMIL, SpaceType.INNER_PRODUCT).build()
     );
 
     final static Nmslib INSTANCE = new Nmslib(METHODS, Collections.emptyMap(), CURRENT_VERSION, EXTENSION);
@@ -66,7 +66,7 @@ class Nmslib extends NativeLibrary {
         String currentVersion,
         String extension
     ) {
-        super(methods, scoreTranslation, currentVersion, extension);
+        super(methods, Map.of(METHOD_HNSW, new DefaultHnswContext()), scoreTranslation, currentVersion, extension);
     }
 
     @Override
