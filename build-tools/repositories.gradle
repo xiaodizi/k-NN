@@ -4,8 +4,13 @@
  */
 
 repositories {
-    mavenLocal()
-    maven { url "https://aws.oss.sonatype.org/content/repositories/snapshots" }
+    maven {
+        url = 'https://packages.aliyun.com/641280a5b6809992bb8fed9a/maven/ratu-tech'
+        credentials {
+            username = '64127f26c1bbc60cefcefda3'
+            password = 'lI=us7iA96H9'
+        }
+    }
     mavenCentral()
     maven { url "https://plugins.gradle.org/m2/" }
 }
