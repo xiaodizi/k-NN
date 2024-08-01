@@ -284,7 +284,8 @@ task release(type: Copy, group: 'build') {
 //****************************************************************************/
 dependencies {
     api "com.ratutech.ratudb:ratudb:${opensearch_version}"
-    api "org.apache.lucene:lucene-core:${versions.lucene}"
+    api "com.ratutech.ratudb:opensearch-common:${opensearch_version}"
+    api "com.ratutech.ratudb:opensearch-core:${opensearch_version}"
     compileOnly "com.ratutech.ratudb.plugin:opensearch-scripting-painless-spi:${versions.ratudb}"
     api group: 'com.google.guava', name: 'failureaccess', version:'1.0.1'
     api group: 'com.google.guava', name: 'guava', version:'32.1.3-jre'
