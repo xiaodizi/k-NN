@@ -283,6 +283,7 @@ dependencies {
     api "com.ratutech.ratudb:ratudb:${opensearch_version}"
     api "com.ratutech.ratudb:opensearch-common:${opensearch_version}"
     api "com.ratutech.ratudb:opensearch-core:${opensearch_version}"
+    api "org.apache.lucene:lucene-codecs:${versions.lucene}"
     api "org.apache.lucene:lucene-core:${versions.lucene}"
     api "org.apache.lucene:lucene-backward-codecs:${versions.lucene}"
     api "org.apache.lucene:lucene-join:${versions.lucene}"
