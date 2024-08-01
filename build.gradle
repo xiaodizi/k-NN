@@ -11,11 +11,9 @@ import java.util.concurrent.Callable
 
 buildscript {
     ext {
-        // build.version_qualifier parameter applies to knn plugin artifacts only. OpenSearch version must be set
-        // explicitly as 'opensearch.version' property, for instance opensearch.version=2.0.0-rc1-SNAPSHOT
-        opensearch_version = System.getProperty("opensearch.version", "3.0.0-SNAPSHOT")
+        opensearch_version = System.getProperty("ratudb.version", "2.2.2-SNAPSHOT")
         version_qualifier = System.getProperty("build.version_qualifier", "")
-        opensearch_group = "org.opensearch"
+        opensearch_group = "com.ratutech.ratudb"
         isSnapshot = "true" == System.getProperty("build.snapshot", "true")
         simd_enabled = System.getProperty("simd.enabled", "true")
         // This flag determines whether the CMake build system should apply a custom patch. It prevents build failures
@@ -29,17 +27,9 @@ buildscript {
         // To prevent this, set build.lib.apply_patches to false after the first cmakeJniLib run.
         commit_lib_patches = System.getProperty("build.lib.commit_patches", "true")
 
-        version_tokens = opensearch_version.tokenize('-')
-        opensearch_build = version_tokens[0] + '.0'
+        version_tokens = opensearch_version
+        opensearch_build = version_tokens
         plugin_no_snapshot = opensearch_build
-        if (version_qualifier) {
-            opensearch_build += "-${version_qualifier}"
-            plugin_no_snapshot += "-${version_qualifier}"
-        }
-        if (isSnapshot) {
-            opensearch_build += "-SNAPSHOT"
-        }
-        //opensearch_no_snapshot = opensearch_build.replace("-SNAPSHOT","")
     }
 
     // This isn't applying from repositories.gradle so repeating git diff it here
@@ -56,7 +46,7 @@ buildscript {
     }
 
     dependencies {
-        classpath "${opensearch_group}.gradle:build-tools:${opensearch_version}"
+        classpath "${opensearch_group}:build-tools:${opensearch_version}"
         configurations.all {
             resolutionStrategy {
                 force("org.eclipse.platform:org.eclipse.core.runtime:4.29.0") // CVE for < 4.29
