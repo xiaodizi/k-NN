@@ -3,7 +3,7 @@
  *  SPDX-License-Identifier: Apache-2.0
  */
 
-rootProject.name = 'opensearch-knn'
+rootProject.name = 'knn'
 
 include ":qa"
 include ":qa:rolling-upgrade"

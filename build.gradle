@@ -205,8 +205,8 @@ publishing {
     publications {
         pluginZip(MavenPublication) { publication ->
             pom {
-                name = "opensearch-knn"
-                description = "OpenSearch k-NN plugin"
+                name = "knn"
+                description = "RatuDB k-NN plugin"
                 groupId = "org.opensearch.plugin"
                 licenses {
                     license {
@@ -218,6 +218,10 @@ publishing {
                     developer {
                         name = "OpenSearch"
                         url = "https://github.com/opensearch-project/k-NN"
+                    }
+                    developer {
+                        name = "RatuDB"
+                        url = "https://github.com/xiaodizi/k-NN"
                     }
                 }
             }
@@ -250,9 +254,9 @@ check.dependsOn spotlessCheck
 check.dependsOn jacocoTestReport
 
 opensearchplugin {
-    name 'opensearch-knn'
+    name 'knn'
     // zip file name and plugin name in ${opensearch.plugin.name} read by OpenSearch when plugin loading
-    description 'OpenSearch k-NN plugin'
+    description 'RatuDB k-NN plugin'
     classname 'org.opensearch.knn.plugin.KNNPlugin'
     extendedPlugins = ['lang-painless']
     licenseFile = rootProject.file('LICENSE.txt')
@@ -266,7 +270,7 @@ tasks.named("integTest").configure {
 task release(type: Copy, group: 'build') {
     dependsOn project.tasks.build
     from(zipTree(project.tasks.bundlePlugin.outputs.files.getSingleFile()))
-    into "build/plugins/opensearch-knn"
+    into "build/plugins/knn"
     includeEmptyDirs = false
     eachFile { it.path = it.path - "opensearch/" }
 }
