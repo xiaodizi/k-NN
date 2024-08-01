@@ -19,7 +19,7 @@ dependenciesInfo.enabled = false
 
 dependencies {
     api "com.ratutech.ratudb:ratudb:${opensearch_version}"
-    compileOnly "com.ratutech.ratudb.plugin:opensearch-scripting-painless-spi:${versions.opensearch}"
+    compileOnly "com.ratutech.ratudb.plugin:opensearch-scripting-painless-spi:${versions.ratudb}"
     api group: 'commons-lang', name: 'commons-lang', version: '2.6'
 
     api "org.apache.logging.log4j:log4j-api:${versions.log4j}"
