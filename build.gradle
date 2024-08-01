@@ -221,7 +221,7 @@ publishing {
                     }
                     developer {
                         name = "RatuDB"
-                        url = "https://github.com/xiaodizi/k-NN"
+                        url = "https://github.com/Ratu-Tech/RatuDB"
                     }
                 }
             }
